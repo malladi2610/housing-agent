@@ -1,0 +1,38 @@
+name: munich-flat-agent
+x-common: &common
+  build: .
+  image: munich-flat-agent:local
+  init: true
+  restart: unless-stopped
+  env_file: .env
+  environment: &environment
+    FLAT_DATA_DIR: /app/data
+    FLAT_UI_PASSWORD: "${FLAT_UI_PASSWORD:?Set FLAT_UI_PASSWORD in .env before starting Docker}"
+  volumes:
+    - tracker-data:/app/data
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+services:
+  web:
+    <<: *common
+    command: ["flat-agent", "web"]
+    environment:
+      <<: *environment
+      FLAT_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+  worker:
+    <<: *common
+    command: ["flat-agent", "worker"]
+    depends_on:
+      web:
+        condition: service_healthy
+volumes:
+  tracker-data:

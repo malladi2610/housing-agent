@@ -1,0 +1,79 @@
+{
+  "config_version": 1,
+  "routing_revision": 2,
+  "status": "design_example_not_evaluated",
+  "provider": "ollama_cloud",
+  "base_url": "https://ollama.com",
+  "chat_path": "/api/chat",
+  "catalog_path": "/api/tags",
+  "api_key_environment_variable": "OLLAMA_API_KEY",
+  "local_inference_enabled": false,
+  "unattended_model_use_enabled": false,
+  "catalog_checked_date": "2026-10-18",
+  "preferred_families": ["glm", "kimi"],
+  "optional_candidates": [
+    {
+      "family": "qwen",
+      "model": null,
+      "enabled": false,
+      "status": "name_interpretation_and_cloud_availability_unverified"
+    }
+  ],
+  "output_validation": {
+    "schema_enforcement": "application",
+    "cloud_native_json_schema_supported": false,
+    "request_schema_in_prompt": true,
+    "validate_with_pydantic": true,
+    "validate_facts_and_business_rules": true,
+    "max_repairs": 1,
+    "max_fallbacks": 1,
+    "max_total_model_calls_per_stage": 3,
+    "invalid_output_action": "needs_review"
+  },
+  "roles": {
+    "extract_and_classify": {
+      "model": "glm-5.3-flash",
+      "fallback_model": "glm-5.3",
+      "required_capabilities": ["completion"],
+      "evaluated": false
+    },
+    "draft_message": {
+      "model": "kimi-k3",
+      "fallback_model": "glm-5.3-flash",
+      "required_capabilities": ["completion"],
+      "evaluated": false
+    },
+    "interpret_complex_reply": {
+      "model": "glm-5.3",
+      "fallback_model": "kimi-k3",
+      "required_capabilities": ["completion"],
+      "evaluated": false
+    },
+    "interpret_screen": {
+      "model": "kimi-k3",
+      "fallback_model": "glm-5.3-flash",
+      "required_capabilities": ["completion", "vision"],
+      "evaluated": false
+    }
+  },
+  "fallbacks_enabled": false,
+  "model_free_stages": [
+    "deduplication",
+    "budget_calculation",
+    "date_and_distance_rules",
+    "job_scheduling",
+    "calendar_conflict_check",
+    "outbound_action_authorization"
+  ],
+  "limits": {
+    "daily_model_call_limit": null,
+    "daily_model_token_limit": null,
+    "require_usage_limit_before_unattended_use": true,
+    "on_account_quota_exhausted": "pause_and_defer"
+  },
+  "memory": {
+    "canonical_store": "sqlite",
+    "conversation_scope": "per_listing_thread",
+    "persist_model_private_reasoning": false
+  }
+}
