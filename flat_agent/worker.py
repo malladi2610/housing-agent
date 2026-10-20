@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import signal
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -11,6 +12,8 @@ from .llm import OllamaRouter
 from .models import CLOSED_STAGES, ScreenOutput
 from .settings import Settings
 from .workflows import Workflows
+from .android import AndroidPipeline
+from .android_config import load_config
 
 
 class Worker:
@@ -20,6 +23,7 @@ class Worker:
         self.store = store or Store(settings.database_path)
         self.router = router or OllamaRouter(settings,self.store)
         self.workflows = Workflows(self.store,self.router,settings.data_dir/"checkpoints.sqlite3")
+        self.android = AndroidPipeline(settings, self.store)
         self.stopping = False
 
     def tick(self):
@@ -27,6 +31,14 @@ class Worker:
         self.store.connector("worker","paused" if profile.paused or profile.search_complete else "ready","Worker heartbeat; jobs persist across restarts")
         if profile.paused or profile.search_complete:
             return False
+        android = load_config(self.store)
+        if android.enabled:
+            interval = android.poll_seconds
+            bucket = int(time.time()) // interval
+            with self.store.connect() as conn:
+                busy = conn.execute("SELECT 1 FROM jobs WHERE kind='android_poll' AND (status='queued' OR (status='running' AND lease_until>?)) LIMIT 1", (now(),)).fetchone()
+            if not busy:
+                self.store.enqueue("android_poll", dedupe_key=f"android-poll:{bucket}")
         if all((self.settings.imap_host,self.settings.imap_user,self.settings.imap_password,self.settings.imap_senders)):
             interval = max(60,self.settings.imap_poll_seconds)
             bucket = int(time.time())//interval
@@ -44,10 +56,13 @@ class Worker:
             if job["kind"] == "analyze":
                 self.workflows.analyze(job["listing_id"],job["id"])
                 updated = self.store.listing(job["listing_id"])
+                self.store.set_setting(f"android_analysis:{updated['id']}", updated["version"])
                 if self.store.setting("auto_draft",False) and updated["match"]["status"]=="match" and not self.store.messages(updated["id"]):
                     self.store.enqueue("draft",updated["id"],dedupe_key=f"auto-draft:{updated['id']}:{updated['version']}:{profile.revision}")
+                self.android.queue_ready()
             elif job["kind"] == "draft":
-                self.workflows.draft(job["listing_id"])
+                message_id = self.workflows.draft(job["listing_id"])
+                self.android.queue_send(message_id)
             elif job["kind"] == "reply":
                 self.workflows.reply(job["listing_id"],job["payload"]["message_id"])
             elif job["kind"] == "followup":
@@ -65,6 +80,15 @@ class Worker:
                             self.store.enqueue("analyze",item["id"],dedupe_key=f"auto-analyze:{item['id']}:{item['version']}")
             elif job["kind"] == "screen":
                 self.screen(job)
+            elif job["kind"] == "android_poll":
+                self.android.poll()
+            elif job["kind"] == "android_pilot":
+                self.android.pilot()
+            elif job["kind"] == "android_capture":
+                self.android.capture()
+            elif job["kind"] == "android_send":
+                if self.android.send(job) == "deferred":
+                    return True
             self.store.finish_job(job)
         except Exception as exc:
             # Known service/domain exceptions contain sanitized, actionable text.
@@ -95,7 +119,8 @@ class Worker:
             with self.store.connect() as conn:
                 conn.execute("UPDATE jobs SET status='queued',due_at=?,lease_until=NULL,lease_token=NULL,attempts=0 WHERE id=? AND lease_token=?", (next_time.astimezone(timezone.utc).isoformat(),job["id"],job["lease_token"]))
             return "deferred"
-        self.workflows.draft(job["listing_id"],kind="followup")
+        message_id = self.workflows.draft(job["listing_id"],kind="followup")
+        self.android.queue_send(message_id)
         return "done"
 
     def screen(self, job):
@@ -116,8 +141,22 @@ class Worker:
             self.stopping = True
         signal.signal(signal.SIGINT,stop)
         signal.signal(signal.SIGTERM,stop)
-        while not self.stopping:
-            did_work = self.tick()
-            if not did_work:
-                time.sleep(2)
-        self.store.connector("worker","stopped","Worker stopped; queued work is retained")
+        finished = threading.Event()
+        def heartbeat():
+            while not finished.wait(8):
+                try:
+                    profile = self.store.profile()
+                    self.store.connector("worker", "paused" if profile.paused or profile.search_complete else "ready", "Background worker is running")
+                except Exception:
+                    pass  # A missing heartbeat expires visibly if the database is unavailable.
+        thread = threading.Thread(target=heartbeat, daemon=True)
+        thread.start()
+        try:
+            while not self.stopping:
+                did_work = self.tick()
+                if not did_work:
+                    time.sleep(2)
+        finally:
+            finished.set()
+            thread.join(timeout=2)
+            self.store.connector("worker","stopped","Worker stopped; queued work is retained")

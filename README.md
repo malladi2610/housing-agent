@@ -13,8 +13,11 @@ The initial search profile accepts studios or shared accommodation, caps **total
 - Pasted listings, `.eml` alert imports and optional read-only SSL IMAP polling with exact allowed senders. Supported direct link patterns: WG-Gesucht, flatsforfriendz, ImmoScout24 and immowelt.
 - Draft editing/copying, explicit recording of a manual platform send, incoming replies, one scheduled follow-up draft, viewing conflict checks and CSV/ICS exports.
 - Local Cua desktop discovery, Appium status checks, screenshot/UI-source capture from an existing emulator session, and Ollama vision interpretation that proposes a next step.
+- macOS setup and login services for the UI, worker and private Appium, with idle-sleep prevention while the worker runs.
+- A shared Windows/macOS physical-Android adapter: USB discovery, local screen/control calibration, bounded feed polling, persistent deduplication, automatic enquiries for verified matches, reply capture and optional single follow-up delivery.
+- A durable phone-send ledger: exact listing/thread/body checks before a click, outgoing-message evidence before recording delivery, and manual reconciliation after uncertain outcomes.
 
-**Live website/app sending and unattended GUI actions are not implemented.** The connection checks are inspection tools, not evidence that a platform accepts automated messaging. Send on the original platform, then record the exact saved text. A challenge or unsupported emulator needs review; this project contains no bot-detection evasion.
+**Android sending requires a successful owner-calibrated pilot on your installed app.** No Flatsforfriends package/activity/selectors are guessed or supplied as a verified profile. The adapter can send initial enquiries for verified matches and optionally one follow-up; automatic reply acceptance and viewing confirmation are not enabled. Other websites still use manual sending. A challenge or unsupported UI pauses the adapter; this project contains no bot-detection evasion.
 
 **Travel times are entered from a routing source.** This release does not calculate live transit/cycling journeys or geocode addresses. Unknown costs, dates and route distances stay in review. A radius alone is not a verified commute.
 
@@ -51,6 +54,22 @@ First-run steps:
 4. Queue **Write a message**, review/edit it, and copy it to the original platform. Save edits before recording a manual send.
 5. Record incoming replies and proposed/confirmed viewings. Jobs and failures appear under **Work & activity**.
 6. After a bounded pilot, optionally enable automatic alert analysis and draft preparation. Model fallback routes are off by default until explicitly enabled. Messages remain drafts for review.
+
+For phone enquiries, use **Android app** after the device pilot; its enquiry mode is independent of email-only draft preparation. Existing Windows setup/launch scripts continue to work. A physical USB Android phone is supported alongside the emulator option.
+
+## Start on your MacBook with your Android phone
+
+With [Homebrew](https://brew.sh) installed, run in the project folder:
+
+```bash
+bash scripts/install-macos-tools.sh
+bash scripts/setup-macos.sh
+bash scripts/start-macos.sh
+```
+
+Open **http://127.0.0.1:8000/android**. Connect the phone by USB, approve debugging on the phone, and use **Check USB phones** to find the actual app/device identifiers. Capture its screen nodes, map the listing/conversation controls, run the read-only pilot, then enable **Send verified matches automatically**. No screenshots are sent to cloud merely by capturing them.
+
+The Mac services restart after a failure and at login. They do not start before login; the worker prevents idle sleep, but the lid must remain open and the phone available. Read [the MacBook + Android setup and Windows-to-Mac migration guide](docs/MACOS.md) for the full calibration procedure, limits and recovery. Stop services with `bash scripts/stop-macos.sh`.
 
 The connected Ollama account is not included. Live cloud inference needs your valid key and model access. The current assignments are candidates, not benchmarked winners for your data:
 
@@ -118,13 +137,13 @@ FLAT_IMAP_POLL_SECONDS=180
 
 Use actual verified sender addresses; no guessed platform senders are built in. IMAP uses SSL, selects the folder read-only, and fetches with `BODY.PEEK[]`. UIDVALIDITY plus UID tracks ingestion. The latest 100 messages in the selected folder are checked per poll; import older `.eml` files manually. An address allowlist is not cryptographic sender verification: all email contents remain untrusted input.
 
-Tracking redirects are not fetched. A recognized listing URL in a reply notification can attach that notification to an existing thread and cancel follow-up work; the excerpt is clearly labeled and is not a substitute for the complete platform conversation. Paste the full reply before agreeing to a viewing. Native platform inbox polling is not implemented.
+Tracking redirects are not fetched. A recognized listing URL in a reply notification can attach that notification to an existing thread and cancel follow-up work; the excerpt is clearly labeled and is not a substitute for the complete platform conversation. Paste the full reply before agreeing to a viewing. There is no full platform-inbox sync; calibrated Android reply checks are bounded to contacted ads reachable in the feed.
 
 ## Android and Cua pilot
 
-The personal Android phone is not required to stay attached. Use the Android SDK Emulator on Windows with hardware acceleration verified on the laptop. Install/sign into the intended app normally and check emulator support before depending on it.
+Use a physical USB Android phone on macOS or Windows, or the Android SDK Emulator with hardware acceleration verified on its host. Install/sign into the intended app normally. The phone must remain attached and available while monitoring; using your personal phone in another app pauses that path.
 
-See [Windows deployment and device pilot](docs/WINDOWS.md) for the Appium setup and desktop-session limits. Appium and Cua inspection do not enable sending. The vision model proposes an action; no click/type is dispatched by this release.
+See [MacBook + Android](docs/MACOS.md) or [Windows deployment](docs/WINDOWS.md). The calibrated Android adapter executes bounded navigation and verified enquiries. Cua and vision interpretation remain inspection/proposal tools; website sending is still manual.
 
 ## Persistence, access and recovery
 
@@ -132,6 +151,7 @@ See [Windows deployment and device pilot](docs/WINDOWS.md) for the Appium setup 
 - `data/checkpoints.sqlite3`: LangGraph workflow checkpoints.
 - `data/secrets.json`: optional local Ollama credential; plaintext protected by local file access, **not encrypted storage**. Use the environment instead if preferred; use disk encryption/appropriate Windows ACLs for the machine.
 - `data/screens/`: uploaded/captured private screenshots and optional UI source. Delete screenshots you no longer need. No screenshot is sent to cloud until you request interpretation.
+- `data/tracker.sqlite3` also stores native ad identities, the phone lease and delivery intents/receipts. An uncertain send blocks further phone delivery until reconciled. Phone connection settings and calibration remain local; secrets and private runtime data are ignored by Git.
 - The UI defaults to loopback. Remote access requires `FLAT_UI_PASSWORD`; use private networking or authenticated HTTPS. Do not expose raw Appium, ADB, Cua or Ollama keys publicly.
 - Mutating forms and APIs require CSRF tokens; no cross-origin API access is enabled. UI/API responses never return the Ollama credential.
 - Worker heartbeats expire visibly. A stopped worker preserves its queue; an expired job lease can be recovered. Failures remain visible for a deliberate retry rather than looping indefinitely.
@@ -146,7 +166,7 @@ uv run flat-agent backup /path/to/private-backup.sqlite3
 
 To restore, stop web/worker, keep a copy of the current data, and replace the tracker database with the backup. Remove stale `tracker.sqlite3-wal`/`-shm` files only while all processes are stopped. Keep credentials separately. Graph checkpoints may be backed up independently while stopped; the tracker and pending jobs remain the source of truth. Test restore before relying on long-term unattended operation.
 
-For 24/7 laptop operation, configure power/sleep behavior and a reviewed startup task yourself. Verify recovery after reboot, host screen lock and loss of network. A healthy web process does not prove the worker, desktop or emulator is working.
+For 24/7 macOS operation, the supplied login services restart the processes and keep an idle-sleep assertion while the worker runs. Windows still needs a reviewed startup task/power configuration. Verify recovery after reboot/login, host screen lock and loss of network. A healthy web process does not prove the phone or app is working.
 
 ## Tests and learning the code
 
@@ -154,7 +174,7 @@ For 24/7 laptop operation, configure power/sleep behavior and a reviewed startup
 uv run pytest -q
 ```
 
-Tests use fake model responses; no real account, API charge or outgoing platform message is required. CI runs on Linux and Windows. Inspect [the architecture walkthrough](docs/ARCHITECTURE.md) to see how n8n concepts map to LangChain/LangGraph and ordinary Python.
+Tests use fake model/device responses; no real account, API charge or outgoing platform message is required. CI runs on Linux, Windows and macOS. Tests cover physical-device selection, exact W3C Unicode input, send-intent recovery, changed ads/replies, phone leases and launchd definitions. Inspect [the architecture walkthrough](docs/ARCHITECTURE.md) to see how n8n concepts map to LangChain/LangGraph and ordinary Python.
 
 The full planning notes are in [PROJECT_PLAN.md](PROJECT_PLAN.md). The design example under `config/` is documentation; active assignments live in the private tracker settings and are editable in the UI.
 

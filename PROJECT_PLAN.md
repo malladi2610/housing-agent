@@ -2,6 +2,8 @@ Munich Flat Agent — proposed build blueprint
 
 Design recorded 18 October 2026. A runnable first version now exists; README.md describes its implemented capabilities and current limits. Initial housing criteria and Ollama Cloud as the inference provider are confirmed; remaining personal profile details, exact mobile app, account access, and model access/budget remain to be configured. The user authorized GitHub publication under malladi2610, with 3-vivek-3 as a fallback. No platform integration has been tested against the user's account or Windows laptop.
 
+Implementation update: the user reports the initial application works and now prefers a MacBook with the personal Android phone attached by USB, with automatic enquiries for verified matches. Version 0.2 adds native macOS login services and a shared macOS/Windows calibrated Android pipeline. See README.md and docs/MACOS.md for the current behavior; emulator-first assumptions below are historical design notes. A real-device selector profile and phone/account pilot remain necessary.
+
 **Goal**
 
 Run a small, self-hosted assistant that discovers Munich rental listings, checks them against the user's requirements, writes short personal applications, follows conversations toward a viewing, and shows the progress of every application in a private web UI. Keep running until the user marks the search complete; scheduling a viewing alone does not stop the search. A viewing or rental outcome cannot be guaranteed.

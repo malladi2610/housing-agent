@@ -74,6 +74,19 @@ class Store:
             CREATE TABLE IF NOT EXISTS mailbox_seen(
               mailbox TEXT NOT NULL,uid_validity TEXT NOT NULL,uid TEXT NOT NULL,created_at TEXT NOT NULL,
               PRIMARY KEY(mailbox,uid_validity,uid));
+            CREATE TABLE IF NOT EXISTS android_ads(
+              listing_id INTEGER PRIMARY KEY REFERENCES listings(id),card_identity TEXT NOT NULL,
+              fingerprint TEXT NOT NULL,package TEXT NOT NULL,udid TEXT NOT NULL,
+              snapshot TEXT NOT NULL,last_seen TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS android_deliveries(
+              id INTEGER PRIMARY KEY,message_id INTEGER NOT NULL UNIQUE REFERENCES messages(id),
+              listing_id INTEGER NOT NULL REFERENCES listings(id),message_version INTEGER NOT NULL,
+              listing_version INTEGER NOT NULL,profile_revision INTEGER NOT NULL,
+              config_revision INTEGER NOT NULL,body_hash TEXT NOT NULL,mode TEXT NOT NULL,
+              status TEXT NOT NULL,intent_at TEXT,completed_at TEXT,evidence TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS device_locks(
+              name TEXT PRIMARY KEY,token TEXT NOT NULL,lease_until TEXT NOT NULL);
             """)
             conn.execute("INSERT OR IGNORE INTO settings VALUES('profile',?)", (Profile().model_dump_json(),))
             conn.execute("INSERT OR IGNORE INTO settings VALUES('roles',?)", (json.dumps(DEFAULT_ROLES),))
@@ -214,6 +227,9 @@ class Store:
         if not body.strip() or len(body) > 5000:
             raise ValueError("Message must contain 1–5000 characters")
         with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM android_deliveries WHERE message_id=? AND status IN ('preparing','sending','uncertain')", (message_id,)).fetchone():
+                raise ValueError("A phone delivery is active or uncertain; reconcile it before editing the message")
             cursor = conn.execute("UPDATE messages SET body=?,version=version+1 WHERE id=? AND version=? AND status='draft'", (body.strip(),message_id,version))
             if not cursor.rowcount:
                 raise ValueError("Draft changed or was already sent; reload")
@@ -230,6 +246,8 @@ class Store:
             if current_profile.revision != profile.revision or current_profile.paused or current_profile.search_complete:
                 raise ValueError("Search settings changed; reload before recording the message")
             row = conn.execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone()
+            if conn.execute("SELECT 1 FROM android_deliveries WHERE message_id=? AND status IN ('preparing','sending','uncertain')", (message_id,)).fetchone():
+                raise ValueError("Reconcile the active phone delivery under Android app before recording a manual send")
             if not row or row["status"] != "draft" or row["version"] != expected_version or row["body"] != exact_body:
                 raise ValueError("Draft changed or was already recorded; reload")
             listing = conn.execute("SELECT * FROM listings WHERE id=?", (row["listing_id"],)).fetchone()
@@ -257,7 +275,7 @@ class Store:
                     return prior[0]
             cursor = conn.execute("INSERT INTO messages(listing_id,direction,body,status,external_id,created_at) VALUES(?,'inbound',?,'received',?,?)", (listing_id,body.strip(),external_id,now()))
             conn.execute("UPDATE messages SET status='superseded' WHERE listing_id=? AND status='draft' AND direction='outbound'", (listing_id,))
-            conn.execute("UPDATE listings SET stage='response_received',updated_at=? WHERE id=? AND stage NOT IN ('secured','rejected','closed','archived')", (now(),listing_id))
+            conn.execute("UPDATE listings SET stage='response_received',updated_at=? WHERE id=? AND stage NOT IN ('secured','rejected','closed','archived','viewing_proposed','viewing_confirmed','viewed')", (now(),listing_id))
             conn.execute("UPDATE jobs SET status='cancelled',finished_at=? WHERE listing_id=? AND kind='followup' AND status='queued'", (now(),listing_id))
             self._event(conn, listing_id, "reply_received", "Incoming reply recorded; pending follow-up cancelled")
             return cursor.lastrowid
@@ -270,7 +288,7 @@ class Store:
         return conn.execute("SELECT id FROM jobs WHERE dedupe_key=?", (dedupe_key,)).fetchone()[0]
 
     def enqueue(self, kind, listing_id=None, payload=None, dedupe_key=None, due_at=None):
-        if kind not in {"analyze", "draft", "reply", "followup", "sync_imap", "screen"}:
+        if kind not in {"analyze", "draft", "reply", "followup", "sync_imap", "screen", "android_poll", "android_pilot", "android_capture", "android_send"}:
             raise ValueError("Unsupported job type")
         with self.connect() as conn:
             return self._enqueue(conn,kind,listing_id,payload or {},dedupe_key or str(uuid.uuid4()),due_at)

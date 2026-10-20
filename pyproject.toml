@@ -1,6 +1,6 @@
 [project]
 name = "munich-flat-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "A private, persistent Munich rental-search assistant built with LangChain, LangGraph and Ollama Cloud."
 requires-python = ">=3.11"
 dependencies = [

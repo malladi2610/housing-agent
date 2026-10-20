@@ -6,7 +6,7 @@ from flat_agent.web import create_app
 
 def test_all_ui_pages_and_csrf(settings,listing_data):
     client=TestClient(create_app(settings))
-    for path in ["/","/profile","/settings","/connections","/jobs","/listings/new"]:
+    for path in ["/","/profile","/settings","/connections","/jobs","/listings/new","/android"]:
         result=client.get(path)
         assert result.status_code==200
         assert "Homeward" in result.text

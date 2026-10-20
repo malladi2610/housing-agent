@@ -1,13 +1,12 @@
-# Verification record
+# Verification record · 0.2
 
-Build date: 18 October 2026.
+- The locked Python suite passes in the managed Linux build environment. It retains the original matching, LangGraph recovery, lease/backup, CSRF/authentication, escaping and LangChain HTTP-contract checks.
+- New tests exercise a complete simulated app-import → extraction → missing-route review → verified facts → Kimi draft → exact send/proof pipeline. They cover duplicate prevention, stale/edited/ungrounded drafts, new incoming replies, contact-hour deferral, exclusive phone leases, changed live ads, personal unsent drafts, send ceilings, interruption before/after a click, owner reconciliation and recovery after a simulated restart.
+- Appium transport tests inspect actual W3C request serialization, explicit physical UDID selection, no reset/auto-launch, Unicode composer input, foreground-app protection, disabled send controls, XML entity rejection and invalid-selector handling. They use HTTP mocks, not a live rental account.
+- macOS checks validate shell syntax and round-trip generated launchd plists, including paths with spaces, private Appium binding, the idle-sleep assertion and absence of secrets in service definitions. GitHub CI runs the Python suite on Linux, Windows and macOS. That does not certify a real Mac's USB permissions, GUI login services or device.
+- Chromium exercised Android setup, Connections, listing detail and shortlist at 1440px and 390px: eight page checks with no horizontal overflow or JavaScript errors. The node picker and real form submission/save were exercised. New Android screenshots contain explicitly synthetic phone/listing data, not a live app profile.
+- The previous 0.1 Docker build/runtime checks verified authentication, non-root imports, shared SQLite heartbeat and restart persistence. This update adds tables without replacing existing tracker data; persistence behavior remains covered by the Python suite. No physical-USB Docker deployment is claimed.
+- No Ollama credential, actual MacBook, USB phone, emulator or Flatsforfriends account was available in this build environment. Real inference/message quality and the native app's accessibility selectors still require the on-device pilot. No real enquiry was sent in development.
+- Calibrated Android initial enquiries/optional single follow-ups are implemented. Full platform inbox synchronization, automatic acceptance of viewing times, website sending and live public-transport/cycling calculation are not implemented.
 
-- The Python test suite passes in the managed Linux build environment. Tests cover cost/date/distance rules, stale draft rejection, exact manual-send recording, reply/follow-up races, viewing confirmations/conflicts/cancellation, duplicate imports, atomic job claims and lease recovery, persistent backups, LangGraph recovery, credential non-disclosure, CSRF/authentication, HTML/CSV escaping, and the real ChatOllama HTTP serialization contract with a fake transport.
-- A real Chromium session exercised seven UI pages at 1440px and 390px widths: 14 successful page checks, no horizontal overflow and no JavaScript page errors. It also submitted profile and listing forms. Screenshots contain synthetic QA data only.
-- The Docker image builds with locked Python dependencies and a non-root runtime user.
-- Two test containers verified web/UI authentication, shared SQLite worker heartbeat, database writes and persistence after restarting the web container. The Compose configuration is validated separately.
-- No Ollama credential was present for live inference. Model quality, account access, real image interpretation, rate limits and costs have not been measured. Fake responses are used by tests; they are not presented as live model results.
-- No real mailbox, Windows laptop, Cua desktop, Android emulator or rental-platform account was connected. IMAP/device integrations require the documented pilot on the user's hardware. Windows launcher scripts are supplied for review but were not executed on Windows in this build environment.
-- Platform message sending, unattended GUI actions and live commute calculation are not implemented. The UI labels these limits explicitly.
-
-Run `uv run pytest -q` to reproduce the Python tests. GitHub Actions is configured to run them on both Linux and Windows once the repository is published.
+Run `uv run --frozen pytest -q`. Inspect [GitHub Actions](https://github.com/malladi2610/housing-agent/actions) for the published commit's platform results. Follow [MACOS.md](MACOS.md) for the hardware pilot and migration.

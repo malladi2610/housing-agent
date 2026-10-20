@@ -1,4 +1,4 @@
-"""Local device inspection. Sending remains a separate, unverified capability."""
+"""Local device inspection. Calibrated Android enquiries live in android.py."""
 from __future__ import annotations
 
 import base64
@@ -16,7 +16,7 @@ class DesktopInspector:
     def status(self):
         binary = shutil.which("cua-driver")
         if not binary:
-            return "not_installed", "Cua Driver is not installed in this desktop. Install it inside the VM during the Windows pilot."
+            return "not_installed", "Cua Driver is not installed in this desktop. Install it in the desktop session you intend to inspect."
         try:
             result = subprocess.run([binary,"call","list_apps","{}"],capture_output=True,text=True,timeout=20,check=False)
             if result.returncode:
@@ -78,6 +78,6 @@ class AndroidInspector:
 
 
 class PlatformSender:
-    """Explicit boundary: no platform has a verified sender in this release."""
+    """Website sending boundary. The calibrated Android path is separate."""
     def send(self, *args, **kwargs):
         raise NotImplementedError("Live platform sending is unavailable. Send on the platform and record the exact message manually.")

@@ -35,7 +35,7 @@ setInterval(async () => {
     badge.replaceChildren();
     const dot = document.createElement("span"); dot.className = "dot";
     badge.append(dot, document.createTextNode(label));
-    if (["/", "/jobs"].includes(window.location.pathname) && !dirty && document.visibilityState === "visible") {
+    if (["/", "/jobs", "/android"].includes(window.location.pathname) && !dirty && document.visibilityState === "visible") {
       const jobs = await fetch("/api/jobs", {credentials: "same-origin"}).then((r) => r.json());
       const signature = JSON.stringify(jobs.map((job) => [job.id, job.status]));
       const previous = sessionStorage.getItem("homeward-jobs");
@@ -44,3 +44,14 @@ setInterval(async () => {
     }
   } catch { /* The visible heartbeat expires; reconnect on the next interval. */ }
 }, 12000);
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-node-selector]");
+  if (!button) return;
+  const role = document.getElementById("selector-target").value;
+  const form = document.getElementById("android-config");
+  form.elements[`selector_${role}_using`].value = button.dataset.nodeUsing;
+  form.elements[`selector_${role}_value`].value = button.dataset.nodeSelector;
+  dirty = true;
+  button.textContent = `Selected for ${role}`;
+});

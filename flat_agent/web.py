@@ -24,6 +24,11 @@ from .ingestion import canonical_listing_url, import_email
 from .llm import ModelError, OllamaRouter
 from .models import DEFAULT_ROLES, ListingInput, Profile, Stage, ViewingInput
 from .settings import Settings
+from .android import AndroidPipeline
+from .android_config import AndroidConfig, SCAN_ROLES, SEND_ROLES, OPTIONAL_ROLES, load_config, save_config
+from .android_phone import adb_devices, adb_foreground, source_nodes
+from .android_store import DeviceLedger
+from . import __version__
 
 ROOT = Path(__file__).resolve().parent
 NUMBERS = {"warm_rent","electricity","internet","other_monthly","all_in_rent","distance_km","cycling_minutes","transit_minutes"}
@@ -116,7 +121,7 @@ def create_app(settings: Settings | None=None) -> FastAPI:
     def health():
         with store.connect() as conn:
             conn.execute("SELECT 1")
-        return {"status":"ok","version":"0.1.0"}
+        return {"status":"ok","version":__version__}
 
     @app.get("/")
     def dashboard(request: Request):
@@ -192,7 +197,9 @@ def create_app(settings: Settings | None=None) -> FastAPI:
 
     @app.get("/listings/{listing_id:int}")
     def detail(request: Request,listing_id: int):
-        return render(request,"detail.html",listing=store.listing(listing_id),messages=store.messages(listing_id),events=store.events(listing_id),viewings=store.viewings(listing_id))
+        with store.connect() as conn:
+            android_listing = bool(conn.execute("SELECT 1 FROM android_ads WHERE listing_id=?", (listing_id,)).fetchone())
+        return render(request,"detail.html",listing=store.listing(listing_id),messages=store.messages(listing_id),events=store.events(listing_id),viewings=store.viewings(listing_id),android_listing=android_listing)
 
     @app.post("/listings/{listing_id}/facts",dependencies=[Depends(mutation)])
     async def facts(request: Request,listing_id: int):
@@ -201,6 +208,7 @@ def create_app(settings: Settings | None=None) -> FastAPI:
         data = read_listing_form(form,current["data"])
         store.update_listing(listing_id,data,int(str(form["version"])))
         store.set_setting(f"manual_fields:{listing_id}",list(set(store.setting(f"manual_fields:{listing_id}",[]))|set(ListingInput.model_fields).intersection(form.keys())|BOOLS))
+        AndroidPipeline(settings, store).queue_ready()
         return redirect(f"/listings/{listing_id}","Facts saved and eligibility recalculated")
 
     @app.post("/listings/{listing_id}/jobs/{kind}",dependencies=[Depends(mutation)])
@@ -352,6 +360,81 @@ def create_app(settings: Settings | None=None) -> FastAPI:
     def connections_page(request: Request):
         return render(request,"connections.html",imap_configured=bool(settings.imap_host and settings.imap_user and settings.imap_password and settings.imap_senders),latest_screen=store.setting("latest_screen"),screen_events=[e for e in store.events(limit=50) if e["kind"]=="screen_interpreted"])
 
+    @app.get("/android")
+    def android_page(request: Request):
+        config = load_config(store)
+        identifier = store.setting("android_inspection", "")
+        nodes = []
+        if re.fullmatch(r"[0-9a-f]{32}", identifier):
+            path = settings.data_dir / "screens" / f"{identifier}.xml"
+            if path.exists():
+                nodes = source_nodes(path.read_text(encoding="utf-8"), config.package)
+        image_exists = bool(re.fullmatch(r"[0-9a-f]{32}", identifier) and (settings.data_dir / "screens" / f"{identifier}.png").exists())
+        return render(request, "android.html", android_config=config, pilot=store.setting("android_pilot", {}), devices=store.setting("android_devices", {}), foreground=store.setting("android_foreground", {}), nodes=nodes, inspected_screen=identifier, phone_image_exists=image_exists, deliveries=DeviceLedger(store).deliveries(), selector_roles=sorted(SCAN_ROLES | SEND_ROLES | OPTIONAL_ROLES))
+
+    @app.post("/android/devices", dependencies=[Depends(mutation)])
+    def android_devices():
+        config = load_config(store)
+        devices = adb_devices()
+        store.set_setting("android_devices", devices)
+        selected = config.udid or (devices["devices"][0]["udid"] if len(devices["devices"]) == 1 else "")
+        store.set_setting("android_foreground", {"udid": selected, **adb_foreground(selected)})
+        return redirect("/android", "USB device check finished. Open Flatsforfriends before checking its foreground package/activity.")
+
+    @app.post("/android/config", dependencies=[Depends(mutation)])
+    async def android_save(request: Request):
+        form = await request.form()
+        values = load_config(store).model_dump()
+        for name in ("udid", "package", "activity", "mode", "poll_seconds", "max_pages", "max_cards", "detail_swipes", "daily_sends", "refresh", "identity_attribute", "thread_matches"):
+            if name in form:
+                values[name] = str(form[name]).strip()
+        values["enabled"] = "enabled" in form
+        values["auto_followups"] = "auto_followups" in form
+        values["selectors"] = {}
+        for role in SCAN_ROLES | SEND_ROLES | OPTIONAL_ROLES:
+            value = str(form.get(f"selector_{role}_value", "")).strip()
+            if value:
+                values["selectors"][role] = {"using": str(form.get(f"selector_{role}_using", "id")), "value": value}
+        config = AndroidConfig.model_validate(values)
+        if config.enabled and config.mode == "automatic":
+            if not settings.secret("OLLAMA_API_KEY") or not store.profile().first_name.strip() or not store.profile().introduction.strip():
+                raise ValueError("Connect Ollama and complete your truthful profile before enabling automatic enquiries")
+        save_config(store, config, acknowledged="pilot_acknowledged" in form)
+        if config.enabled:
+            store.enqueue("android_poll")
+        return redirect("/android", "Phone settings saved. Monitoring " + ("enabled" if config.enabled else "paused"))
+
+    @app.post("/android/jobs/{kind}", dependencies=[Depends(mutation)])
+    def android_job(kind: str):
+        if kind not in {"capture", "pilot", "poll"}:
+            raise ValueError("Unknown phone task")
+        store.enqueue("android_" + kind)
+        return redirect("/android", "Phone task queued. See Work & activity for progress or errors.")
+
+    @app.post("/android/pause", dependencies=[Depends(mutation)])
+    def android_pause():
+        AndroidPipeline(settings, store).pause("Phone monitoring paused by owner")
+        return redirect("/android", "Phone actions paused; other search sources can continue")
+
+    @app.post("/android/messages/{message_id}/approve", dependencies=[Depends(mutation)])
+    async def android_approve(request: Request, message_id: int):
+        form = await request.form()
+        if "acknowledged" not in form:
+            raise ValueError("Approve the exact saved text and recipient before queuing a phone send")
+        ledger = DeviceLedger(store)
+        ledger.approve(message_id, int(str(form["version"])), str(form.get("body", "")))
+        message = store.message(message_id)
+        store.enqueue("android_send", message["listing_id"], {"message_id": message_id, "mode": "approved"})
+        return redirect(f"/listings/{message['listing_id']}", "Exact phone send queued; the worker rechecks the live listing and conversation before sending")
+
+    @app.post("/android/deliveries/{attempt_id}/reconcile", dependencies=[Depends(mutation)])
+    async def android_reconcile(request: Request, attempt_id: int):
+        form = await request.form()
+        if "acknowledged" not in form:
+            raise ValueError("Check the actual conversation on your phone before reconciling delivery")
+        DeviceLedger(store).reconcile(attempt_id, str(form.get("outcome", "")), str(form.get("evidence", "")))
+        return redirect("/android", "Delivery evidence recorded. A failed send requires a deliberate retry in Work & activity.")
+
     @app.post("/connections/probe",dependencies=[Depends(mutation)])
     def probe_connections():
         state,detail = DesktopInspector().status()
@@ -432,7 +515,10 @@ def create_app(settings: Settings | None=None) -> FastAPI:
 
     @app.get("/api/meta")
     def meta():
-        return {"csrf_token":settings.csrf_token(),"live_sending_enabled":False,"key_configured":bool(settings.secret("OLLAMA_API_KEY"))}
+        config = load_config(store)
+        pilot = store.setting("android_pilot", {})
+        enabled = config.enabled and config.mode == "automatic" and pilot.get("fingerprint") == config.fingerprint() and pilot.get("conversation_verified", False)
+        return {"csrf_token":settings.csrf_token(),"live_sending_enabled":enabled,"key_configured":bool(settings.secret("OLLAMA_API_KEY"))}
 
     @app.get("/api/listings")
     def list_api():

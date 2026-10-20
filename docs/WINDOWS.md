@@ -1,6 +1,12 @@
 # Windows host and Android pilot
 
-The target is a Windows laptop with around 32 GB RAM and an AMD processor described as “395 Max.” Exact OS/CPU/firmware settings have not been inspected. The personal Android phone remains independent.
+The target is a Windows laptop with around 32 GB RAM and an AMD processor described as “395 Max.” Exact OS/CPU/firmware settings have not been inspected. The personal Android phone can now be attached by USB, or you can use an emulator. For a MacBook, use [MACOS.md](MACOS.md).
+
+## Physical USB phone and the shared adapter
+
+The existing Windows setup/start scripts remain valid. Install the Android SDK/Java/Node/Appium tools described below, authorize USB debugging on your own phone, and run `adb devices` to check it is authorized. Start Appium on `127.0.0.1:4723`, open the rental app on the phone and visit **Android app** in Homeward. That page discovers the device and current package/activity, captures local screen nodes and calibrates the listing/conversation controls. No emulator is required for this path.
+
+Follow the calibration, automatic-send and delivery-recovery steps in [the shared phone guide](MACOS.md#connect-and-inspect-the-phone). Native ad capture, verified-match enquiries, incoming-message polling and optional single follow-up delivery use the same code on both systems. The helper under `scripts/android-session.py` remains an optional existing-session inspection path; automatic monitoring manages its own session and does not need a pasted session ID.
 
 ## First run from this repository
 
@@ -64,7 +70,7 @@ Cua's native Windows driver needs an interactive desktop session. Windows servic
 
 Test an ordinary restart, host screen lock, remote-viewer disconnect, network interruption and expiring app login. The web UI, worker, Cua desktop and emulator have separate health states. Keep normal host screen-lock protection; establish an appropriate private guest session for computer use.
 
-The application never claims a message was sent by Cua/Appium in this release. When future platform adapters are implemented, require exact recipient/body verification, visible delivery evidence, and reconciliation after an uncertain result. A click alone is not a delivery receipt.
+The calibrated Android adapter records a send only after finding the exact outgoing text in the verified conversation, or after explicit owner reconciliation. A click alone is not a delivery receipt. Cua/vision inspection still does not send website messages.
 
 Primary setup references:
 

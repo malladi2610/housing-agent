@@ -11,6 +11,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from .db import Store
 from .matching import evaluate
 from .models import CLOSED_STAGES, DraftOutput, Extraction, ListingInput, ReplyOutput
+from .android_store import body_hash
 
 
 class WorkflowState(TypedDict, total=False):
@@ -133,7 +134,10 @@ class Workflows:
         if in_reply_to is None:
             inbound = [m for m in messages if m["direction"] == "inbound"]
             in_reply_to = inbound[-1]["id"] if inbound else None
-        return self.store.add_draft(listing_id,result.text,model,profile.revision,listing["version"],kind,in_reply_to)
+        identifier = self.store.add_draft(listing_id,result.text,model,profile.revision,listing["version"],kind,in_reply_to)
+        source = (listing["data"]["title"] + "\n" + listing["data"]["description"]).casefold()
+        self.store.set_setting(f"draft_review:{identifier}", {"grounded": result.listing_detail.casefold() in source, "needs_user_input": result.needs_user_input, "body_hash": body_hash(result.text)})
+        return identifier
 
     def reply(self, listing_id: int, message_id: int):
         profile = self.store.profile()
