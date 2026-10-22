@@ -145,7 +145,8 @@ class Store:
         now = datetime.now().isoformat(timespec="seconds")
         data = json.dumps(asdict(l), default=str, ensure_ascii=False)
         self.db.execute(
-            "insert or ignore into listings values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "insert or ignore into listings (key, source, url, summary, km, score, status, reason, message,"
+            " backlog, data, first_seen, updated) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (l.key, l.source, l.url, l.summary(), km_to_work(l, cfg), score(l, cfg),
              status, reason, "", int(backlog), data, now, now),
         )

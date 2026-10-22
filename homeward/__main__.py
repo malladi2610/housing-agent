@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .core import DATA, ROOT, Store, km_to_work, listing_from_row, load_config
@@ -53,6 +54,7 @@ def service(action: str) -> None:
 """)
         DATA.mkdir(exist_ok=True)
         subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], capture_output=True)
+        time.sleep(2)  # let the old instance exit before re-registering
         subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(PLIST)], check=True)
         print(f"started; logs: tail -f {DATA}/homeward.log")
     elif action == "uninstall":

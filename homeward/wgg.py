@@ -5,12 +5,14 @@ Log in once with `homeward login`; the session is kept in data/browser.
 from __future__ import annotations
 
 import re
+import subprocess
 
 from playwright.sync_api import TimeoutError as PWTimeout, sync_playwright
 
 from .core import DATA, Listing
 
 PROFILE = DATA / "browser"
+CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 LOGIN_URL = "https://www.wg-gesucht.de/mein-wg-gesucht.html"
 
 
@@ -23,20 +25,29 @@ def _context(p, headless: bool):
     return p.chromium.launch_persistent_context(
         str(PROFILE), channel="chrome", headless=headless, locale="de-DE",
         viewport={"width": 1280, "height": 900},
+        # use the real macOS keychain so cookies from the plain-Chrome login stay readable
+        ignore_default_args=["--use-mock-keychain", "--password-store=basic"],
     )
 
 
 def login() -> None:
+    """Open the bot profile in a *plain* Chrome (no automation flags, so Google sign-in works)."""
+    PROFILE.mkdir(parents=True, exist_ok=True)
+    print("Log in to WG-Gesucht in the new Chrome window, then quit it with Cmd+Q.", flush=True)
+    subprocess.run([CHROME, f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
+                    LOGIN_URL])
+    print("logged in" if is_logged_in() else "still not logged in", flush=True)
+
+
+def is_logged_in() -> bool:
     with sync_playwright() as p:
-        ctx = _context(p, headless=False)
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.goto(LOGIN_URL)
-        print("Log in to WG-Gesucht in the opened window, then close the window.")
+        ctx = _context(p, headless=True)
         try:
-            page.wait_for_event("close", timeout=0)
-        except Exception:
-            pass
-        ctx.close()
+            page = ctx.new_page()
+            page.goto(LOGIN_URL, wait_until="domcontentloaded")
+            return bool(page.locator("a[href*='logout'], a[href*='abmelden']").count())
+        finally:
+            ctx.close()
 
 
 def message_url(l: Listing) -> str:

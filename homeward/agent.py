@@ -80,8 +80,9 @@ class Agent:
 
     def work(self) -> None:
         run = self.cfg["run"]
+        enabled = {"fff": self.cfg["sources"]["flatsforfriendz"], "wgg": self.cfg["sources"]["wg_gesucht"]}
         for src in ("fff", "wgg"):
-            if self.store.sent_today(src) >= run["daily_cap"]:
+            if not enabled[src] or self.store.sent_today(src) >= run["daily_cap"]:
                 continue
             todo = self.store.queue(src, backlog=False)
             lo, hi = run["backlog_hours"]
