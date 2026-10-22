@@ -93,9 +93,11 @@ class Phone:
 
     def tab(self, name: str) -> None:
         """Go to a bottom-navigation tab (Explore, Guide, Home, Chat, Profile)."""
-        self.d.app_start(PKG)
         for _ in range(6):
-            tab = self.d(description=name, className="android.view.View")
+            if self.d.app_current().get("package") != PKG:  # backed out of the app, or never in it
+                self.d.shell(f"am start -W -n {PKG}/.MainActivity")
+                time.sleep(2)
+            tab = self.d(text=name, className="android.widget.TextView")  # desc gains badges ("Chat, 1")
             if tab.exists:
                 tab.click()
                 time.sleep(2.5)
