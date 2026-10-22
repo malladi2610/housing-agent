@@ -124,6 +124,7 @@ def _confirm(page, ok: str, err: str = "#no-error-box") -> None:
     try:
         page.wait_for_function(CONFIRM_JS, arg=[ok, err], timeout=20000)
     except PWTimeout:
+        page.screenshot(path=str(DATA / "last_uncertain_send.png"), full_page=True)
         raise SiteError(f"no confirmation after send (uncertain - check the site's outbox) {page.evaluate(ALERTS_JS)}")
     if not re.search(ok, page.inner_text("body"), re.I):
         raise SiteError(f"site error after send: {page.locator(err).first.inner_text()[:150]}")
@@ -240,6 +241,13 @@ def send_ka(l: Listing, message: str) -> None:
                 if not value:
                     raise SiteError(f"Kleinanzeigen form needs {label} - set [me] last_name in config.toml, not sending")
                 field.first.fill(value)
+        anrede = form.locator("button", has_text="Bitte wählen")  # required salutation dropdown
+        if anrede.count():
+            if not me.get("salutation"):
+                raise SiteError("Kleinanzeigen form needs an Anrede - set [me] salutation in config.toml, not sending")
+            anrede.first.click()
+            page.get_by_role("option", name=me["salutation"], exact=True).first.click()
+            page.wait_for_timeout(300)
         name = form.locator("input[name=contactName]").or_(form.get_by_label(re.compile(r"^(Profilname|Vorname)"))).first
         if name.count() and not name.input_value().strip():
             raise SiteError("Kleinanzeigen contact name is empty (set a profile name), not sending")

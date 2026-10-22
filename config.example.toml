@@ -3,6 +3,7 @@
 [me]
 first_name = "Subhash"
 last_name = ""                 # used only where a site's form requires it
+salutation = ""             # Anrede on forms that require it (Herr / Frau / Divers / Keine Angabe)
 # Only facts written here will ever appear in a message. Keep it truthful.
 about = """
 I'm Subhash, ... (job / company near MTZ, since when, age, languages, hobbies,
