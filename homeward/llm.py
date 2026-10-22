@@ -27,6 +27,9 @@ LISTING ({source}, {km} km from work):
 Reject (fit=false) if the listing: is a search ad / swap (Tausch) / commercial agency asking fees;
 requires a gender, age, student status or occupation the applicant does not have; is only a short
 sublet below {min_months} months; asks for money/ID before a viewing; or is clearly a scam.
+Munich scam signs: a whole flat far below market (roughly under €15/m² cold, e.g. a furnished 38 m² flat
+for €360), "no deposit" plus "fully furnished" plus a vague or very short text, landlord abroad,
+contact via email/WhatsApp/external forms only. Two or more of these together = reject as a scam.
 If information is just missing, that is NOT a reason to reject.
 
 The message (if fit): in the listing's language (German listing -> German, English -> English),
