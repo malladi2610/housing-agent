@@ -1,18 +1,23 @@
-"""WG-Gesucht messaging through a dedicated Chrome profile (Playwright).
+"""WG-Gesucht messaging through a dedicated, always-running Chrome window.
 
-Log in once with `homeward login`; the session is kept in data/browser.
+WG-Gesucht keeps the login in a session cookie, so the bot never quits that window: it runs a
+plain Chrome (no automation flags, so Google sign-in works) on its own profile with a
+localhost-only debugging port, and Playwright attaches to it to send messages.
 """
 from __future__ import annotations
 
 import re
 import subprocess
+import time
 
+import httpx
 from playwright.sync_api import TimeoutError as PWTimeout, sync_playwright
 
 from .core import DATA, Listing
 
 PROFILE = DATA / "browser"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+PORT = 9333
 LOGIN_URL = "https://www.wg-gesucht.de/mein-wg-gesucht.html"
 
 
@@ -20,66 +25,109 @@ class WggError(RuntimeError):
     pass
 
 
-def _context(p, headless: bool):
+def ensure_browser() -> str:
+    """Start the bot's Chrome if it isn't running; return its CDP endpoint."""
+    url = f"http://127.0.0.1:{PORT}"
+    try:
+        httpx.get(url + "/json/version", timeout=2)
+        return url
+    except httpx.HTTPError:
+        pass
     PROFILE.mkdir(parents=True, exist_ok=True)
-    return p.chromium.launch_persistent_context(
-        str(PROFILE), channel="chrome", headless=headless, locale="de-DE",
-        viewport={"width": 1280, "height": 900},
-        # use the real macOS keychain so cookies from the plain-Chrome login stay readable
-        ignore_default_args=["--use-mock-keychain", "--password-store=basic"],
-    )
+    subprocess.Popen([CHROME, f"--user-data-dir={PROFILE}", f"--remote-debugging-port={PORT}",
+                      "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check",
+                      LOGIN_URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(30):
+        time.sleep(1)
+        try:
+            httpx.get(url + "/json/version", timeout=2)
+            return url
+        except httpx.HTTPError:
+            continue
+    raise WggError("bot Chrome did not start")
+
+
+def logged_in(page) -> bool:
+    page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    page.wait_for_timeout(1500)
+    return "modal=sign_in" not in page.url
 
 
 def login() -> None:
-    """Open the bot profile in a *plain* Chrome (no automation flags, so Google sign-in works)."""
-    PROFILE.mkdir(parents=True, exist_ok=True)
-    print("Log in to WG-Gesucht in the new Chrome window, then quit it with Cmd+Q.", flush=True)
-    subprocess.run([CHROME, f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
-                    LOGIN_URL])
-    print("logged in" if is_logged_in() else "still not logged in", flush=True)
-
-
-def is_logged_in() -> bool:
+    endpoint = ensure_browser()
     with sync_playwright() as p:
-        ctx = _context(p, headless=True)
-        try:
-            page = ctx.new_page()
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            return bool(page.locator("a[href*='logout'], a[href*='abmelden']").count())
-        finally:
-            ctx.close()
+        ctx = p.chromium.connect_over_cdp(endpoint).contexts[0]
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        page.goto(LOGIN_URL)
+        page.bring_to_front()
+    print("Log in to WG-Gesucht in the bot's Chrome window. Leave that window open (minimise it).")
 
 
 def message_url(l: Listing) -> str:
     return re.sub(r"wg-gesucht\.de/", "wg-gesucht.de/nachricht-senden/", l.url, count=1)
 
 
-def send(l: Listing, message: str, headless: bool = True) -> None:
+def send(l: Listing, message: str) -> None:
     with sync_playwright() as p:
-        ctx = _context(p, headless)
+        ctx = p.chromium.connect_over_cdp(ensure_browser()).contexts[0]
+        page = ctx.new_page()
         try:
-            page = ctx.new_page()
             page.goto(message_url(l), wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
             _dismiss_cookies(page)
-            if page.locator("text=/loggen Sie sich/").count() or "login" in page.url:
+            if "modal=sign_in" in page.url or page.locator("#login_form:visible").count():
                 raise WggError("not logged in - run `homeward login`")
             if page.locator("text=bereits eine Nachricht").count():
                 raise WggError("already contacted")
-            # security-advice overlay shown before the first message
-            for label in ("Ich habe die Sicherheitstipps gelesen", "Sicherheitstipps gelesen"):
-                btn = page.get_by_text(label)
-                if btn.count():
-                    btn.first.click()
-            box = page.locator("textarea#message_input, textarea[name='content'], textarea").first
+            # safety-tips overlay shown before messaging
+            tips = page.locator("#sec_advice_submit_button")
+            if tips.is_visible():
+                tips.click()
+                page.wait_for_timeout(500)
+            plus = page.locator("#wgg_plus_toggle")  # paid "appear at top of inbox" boost
+            if plus.count() and plus.is_checked():
+                raise WggError("paid boost toggle is on, not sending")
+            box = page.locator("textarea#message_input")
             box.wait_for(state="visible", timeout=15000)
             box.fill(message)
-            page.locator("button:has-text('Nachricht senden'), button[type='submit']").first.click()
-            try:
-                page.wait_for_selector("text=/erfolgreich|gesendet|Nachricht wurde/i", timeout=20000)
+            if box.input_value().strip()[:40] != message.strip()[:40]:
+                raise WggError("composer text mismatch, not sending")
+            page.locator("button.wgg-btn-primary", has_text=re.compile(r"^\s*Senden\s*$")).first.click()
+            try:  # success = we leave the compose page or see a confirmation
+                page.wait_for_function(
+                    "() => !location.pathname.startsWith('/nachricht-senden') || "
+                    "/erfolgreich|wurde gesendet|Nachricht gesendet/i.test(document.body.innerText)", timeout=20000)
             except PWTimeout:
                 raise WggError("no confirmation after send (uncertain)")
         finally:
-            ctx.close()
+            page.close()
+
+
+INBOX_JS = """() => [...document.querySelectorAll('div[id^=conversation_][data-conversation_id]')].map(e => {
+  const lines = e.innerText.split('\\n').map(t => t.trim()).filter(Boolean);
+  const name = (e.querySelector('.contacted_user_public_name') || {}).innerText || lines[0] || '';
+  const mine = lines.find(t => t.startsWith('Ich:'));
+  return {id: e.dataset.conversation_id, last: e.dataset.message_id, name: name.trim(),
+          title: lines[1] || '', preview: mine || lines[2] || '', mine: !!mine};
+})"""
+
+
+def inbox() -> list[dict]:
+    """Conversation rows of the WG-Gesucht inbox (first page, newest first)."""
+    with sync_playwright() as p:
+        ctx = p.chromium.connect_over_cdp(ensure_browser()).contexts[0]
+        page = ctx.new_page()
+        try:
+            page.goto("https://www.wg-gesucht.de/nachrichten.html", wait_until="domcontentloaded")
+            try:
+                page.wait_for_selector("div[id^=conversation_][data-conversation_id]", timeout=20000)
+            except PWTimeout:
+                pass
+            if "modal=sign_in" in page.url:
+                raise WggError("not logged in - run `homeward login`")
+            return page.evaluate(INBOX_JS)
+        finally:
+            page.close()
 
 
 def _dismiss_cookies(page) -> None:

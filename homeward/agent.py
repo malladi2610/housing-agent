@@ -10,6 +10,11 @@ from . import llm, sources
 from .core import Listing, Store, check, km_to_work, listing_from_row, load_config, log
 
 
+def title_key(title: str) -> str:
+    """WG-Gesucht inbox rows show the ad title; its prefix links a reply to our listing."""
+    return " ".join(title.split())[:30]
+
+
 def notify(title: str, body: str) -> None:
     body = body.replace('"', "'")[:200]
     subprocess.run(["osascript", "-e", f'display notification "{body}" with title "{title}" sound name "Glass"'],
@@ -79,6 +84,9 @@ class Agent:
     # ---------- applying ----------
 
     def work(self) -> None:
+        from .dashboard import PAUSE
+        if PAUSE.exists():
+            return
         run = self.cfg["run"]
         enabled = {"fff": self.cfg["sources"]["flatsforfriendz"], "wgg": self.cfg["sources"]["wg_gesucht"]}
         for src in ("fff", "wgg"):
@@ -132,6 +140,7 @@ class Agent:
             else:
                 from .wgg import send
                 send(l, msg)
+                self.store.set_contact(l.key, title_key(l.title))
             self.store.set(l.key, "applied", verdict.get("model", ""), msg)
             log(f"[{l.source}] APPLIED {km} km €{l.rent} {l.district} {l.url}")
             notify("Homeward: applied ✓", f"{km} km · €{l.rent} · {l.district}")
@@ -161,9 +170,15 @@ class Agent:
 
     def check_replies(self) -> None:
         every = self.cfg["run"].get("reply_check_minutes", 10) * 60
-        if not self.cfg["sources"]["flatsforfriendz"] or time.time() - self.last_replies < every:
+        if time.time() - self.last_replies < every:
             return
         self.last_replies = time.time()
+        if self.cfg["sources"]["flatsforfriendz"]:
+            self._replies_fff()
+        if self.cfg["sources"]["wg_gesucht"]:
+            self._replies_wgg()
+
+    def _replies_fff(self) -> None:
         try:
             if self.phone.ready():
                 return
@@ -178,13 +193,30 @@ class Agent:
             changed = self.store.thread_changed("fff", r["name"], r["when"], r["preview"])
             if first or changed is False or r["preview"].startswith(self.PENDING):
                 continue
-            name, text = " ".join(r["name"].split()), r["preview"].replace("\n", " ")
+            text = r["preview"].replace("\n", " ")
             if "no longer active" in text or "nicht mehr aktiv" in text:
-                self.store.mark_contact("fff", name, "closed", text[:120])
+                self.store.mark_contact("fff", r["name"], "closed", text[:120])
                 continue
-            n = self.store.mark_contact("fff", name, "replied", text[:200])
-            log(f"[fff] REPLY from {name}: {text[:300]}")
-            notify(f"Homeward: reply from {name}", text if n else f"(chat not from the bot) {text}")
+            self._reply("fff", r["name"], r["name"], text)
+
+    def _replies_wgg(self) -> None:
+        from .wgg import inbox
+        try:
+            first = not self.store.has_threads("wgg")
+            rows = inbox()
+        except Exception as e:
+            log(f"[wgg] reply check failed: {type(e).__name__}: {e}")
+            return
+        for r in rows:
+            changed = self.store.thread_changed("wgg", r["id"], r["last"], r["preview"])
+            if first or changed is False or r["mine"]:
+                continue
+            self._reply("wgg", r["name"].split(" (")[0], title_key(r["title"]), r["preview"])
+
+    def _reply(self, src: str, name: str, contact: str, text: str) -> None:
+        n = self.store.mark_contact(src, contact, "replied", text[:200])
+        log(f"[{src}] REPLY from {name}: {text[:300]}")
+        notify(f"Homeward: reply from {name}", text if n else f"(not a bot application) {text}")
 
     # ---------- main loop ----------
 
@@ -196,7 +228,9 @@ class Agent:
         self.check_replies()
 
     def run(self) -> None:
-        log(f"homeward started (send={'off' if self.dry else 'on'})")
+        from .dashboard import PORT, serve
+        serve()
+        log(f"homeward started (send={'off' if self.dry else 'on'}), dashboard http://127.0.0.1:{PORT}")
         while True:
             try:
                 self.tick()

@@ -51,13 +51,14 @@ def assess(l: Listing, cfg: dict, km: float | None) -> dict:
         summary=l.summary(), title=l.title, text=l.text or "(no description available)",
     )
     last = None
-    for model in (r["model"], r["fallback_model"]):
+    for model in (r["model"], r["model"], r["fallback_model"]):  # empty replies happen; retry once
         try:
             resp = httpx.post(f"{r['ollama_url']}/api/chat", timeout=180, json={
                 "model": model, "stream": False, "format": "json",
                 "messages": [{"role": "user", "content": prompt}],
             }).raise_for_status().json()
-            out = json.loads(resp["message"]["content"])
+            content = resp["message"]["content"].strip().removeprefix("```json").strip("`").strip()
+            out = json.loads(content)
             msg = (out.get("message") or "").strip()
             if out.get("fit") and (len(msg) < 60 or re.search(r"\[[^\]]+\]|\{[^}]+\}", msg)):
                 raise ModelError(f"unusable message: {msg[:80]!r}")
@@ -65,4 +66,4 @@ def assess(l: Listing, cfg: dict, km: float | None) -> dict:
             return out
         except (httpx.HTTPError, ValueError, KeyError, ModelError) as e:
             last = e
-    raise ModelError(f"both models failed: {last}")
+    raise ModelError(f"models failed: {last}")
