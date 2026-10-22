@@ -215,7 +215,8 @@ class Agent:
         if time.time() - self.last_replies < every:
             return
         self.last_replies = time.time()
-        if self.cfg["sources"]["flatsforfriendz"]:
+        from .dashboard import PAUSE
+        if self.cfg["sources"]["flatsforfriendz"] and not PAUSE.exists():  # paused = hands off the phone
             self._replies_fff()
         if self.cfg["sources"]["wg_gesucht"]:
             self._replies_wgg()
