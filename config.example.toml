@@ -1,0 +1,37 @@
+# Copy to config.toml (git-ignored) and fill in [me].
+
+[me]
+first_name = "Subhash"
+# Only facts written here will ever appear in a message. Keep it truthful.
+about = """
+I'm Subhash, ... (job / company near MTZ, since when, age, languages, hobbies,
+what kind of flatmate you are, non-smoker, etc.)
+"""
+
+[search]
+workplace = [48.173958, 11.532226]   # MTZ, Agnes-Pockels-Bogen 1, 80992 München
+max_km = 6.0                          # straight-line distance to workplace
+max_rent = 850                        # all-in €/month
+min_rent = 300                        # anything cheaper is a placeholder / scam
+target_move_in = "2026-11-15"
+latest_move_in = "2027-01-01"
+min_months = 6                        # open-ended listings always pass
+
+[run]
+poll_seconds = 60
+send = true                  # false = only notify with drafts
+daily_cap = 40               # max messages per source per day
+backlog_every_minutes = 6    # pace for listings that existed before the first run
+backlog_hours = [8, 22]      # backlog only during the day; new listings anytime
+model = "kimi-k3:cloud"
+fallback_model = "glm-5.2:cloud"
+ollama_url = "http://localhost:11434"
+
+[sources]
+flatsforfriendz = true
+wg_gesucht = true
+wg_gesucht_pages = 2         # search pages polled per tick (newest first)
+
+[phone]
+package = "com.flatsforfriendz.app"   # set by `homeward phone` after calibration
+serial = ""                            # empty = the only connected device
