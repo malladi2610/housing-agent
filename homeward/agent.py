@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 
 from . import llm, sources
-from .core import Listing, Store, check, km_to_work, listing_from_row, load_config, log
+from .core import DATA, Listing, Store, check, km_to_work, listing_from_row, load_config, log
 
 
 def title_key(title: str) -> str:
@@ -146,7 +146,7 @@ class Agent:
             notify("Homeward: applied ✓", f"{km} km · €{l.rent} · {l.district}")
         except (PhoneError, WggError) as e:
             text = str(e)
-            if "already contacted" in text:
+            if "already contacted" in text or text.startswith("skip:"):
                 self.store.set(l.key, "skipped", text)
             elif "not logged in" in text:
                 log(f"[wgg] {text}")
@@ -194,6 +194,11 @@ class Agent:
             if first or changed is False or r["preview"].startswith(self.PENDING):
                 continue
             text = r["preview"].replace("\n", " ")
+            if "accepted your request" in text:
+                self.store.mark_contact("fff", r["name"], "replied", "ACCEPTED - chat is open")
+                log(f"[fff] ACCEPTED by {r['name']}: {text}")
+                notify(f"Homeward: {r['name']} accepted!", "Open the chat in Flatsforfriendz and say hi")
+                continue
             if "no longer active" in text or "nicht mehr aktiv" in text:
                 self.store.mark_contact("fff", r["name"], "closed", text[:120])
                 continue
@@ -221,6 +226,7 @@ class Agent:
     # ---------- main loop ----------
 
     def tick(self) -> None:
+        (DATA / "heartbeat").write_text(datetime.now().isoformat(timespec="seconds"))
         n = self.poll()
         if n:
             log(f"{n} new matching listing(s)")

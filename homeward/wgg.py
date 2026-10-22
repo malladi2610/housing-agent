@@ -79,6 +79,8 @@ def send(l: Listing, message: str) -> None:
                 raise WggError("not logged in - run `homeward login`")
             if page.locator("text=bereits eine Nachricht").count():
                 raise WggError("already contacted")
+            if page.locator("text=HousingAnywhere").count():
+                raise WggError("skip: agency listing (HousingAnywhere, booking fees)")
             # safety-tips overlay shown before messaging
             tips = page.locator("#sec_advice_submit_button")
             if tips.is_visible():
@@ -96,6 +98,7 @@ def send(l: Listing, message: str) -> None:
             try:  # success = we leave the compose page or see a confirmation
                 page.wait_for_function(
                     "() => !location.pathname.startsWith('/nachricht-senden') || "
+                    "!(document.querySelector('#message_input') || {value: ''}).value || "
                     "/erfolgreich|wurde gesendet|Nachricht gesendet/i.test(document.body.innerText)", timeout=20000)
             except PWTimeout:
                 raise WggError("no confirmation after send (uncertain)")

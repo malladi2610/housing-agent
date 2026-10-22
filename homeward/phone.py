@@ -107,6 +107,8 @@ class Phone:
     def chats(self) -> list[dict]:
         """Rows of the Chat tab (newest first): name, time, last-message preview."""
         self.tab("Chat")
+        if not self.d(textStartsWith="Chats").wait(timeout=5):
+            raise PhoneError("not on the Chats screen")
         if self.d(description="All").click_exists(timeout=3):
             time.sleep(2)
         rows = []

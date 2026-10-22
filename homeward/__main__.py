@@ -4,6 +4,7 @@
   once [--dry]         a single poll/apply round
   scan                 poll only, then show the ranked queue (sends nothing)
   status               counts and the latest activity
+  health               one-line check for monitoring; details only when something needs attention
   draft KEY            show the message the model would send for one listing (sends nothing)
   login                open the bot's Chrome window to log in to WG-Gesucht once
   retry                re-queue failed listings
@@ -65,6 +66,27 @@ def service(action: str) -> None:
         subprocess.run(["launchctl", "print", f"gui/{uid}/{LABEL}"])
 
 
+def health() -> None:
+    """Cheap monitor: heartbeat age, today's numbers, and only the log lines since the last check that matter."""
+    from datetime import datetime
+    store = Store()
+    beat = DATA / "heartbeat"
+    age = (datetime.now() - datetime.fromisoformat(beat.read_text())).total_seconds() / 60 if beat.exists() else 1e9
+    counts = {r["status"]: r["n"] for r in store.db.execute("select status, count(*) n from listings group by 1")}
+    sent = sum(store.sent_today(s) for s in ("fff", "wgg"))
+    log, mark = DATA / "homeward.log", DATA / "health.offset"
+    lines = log.read_text().splitlines() if log.exists() else []
+    start = int(mark.read_text()) if mark.exists() else max(0, len(lines) - 50)
+    mark.write_text(str(len(lines)))
+    events = [l for l in lines[start:] if any(k in l for k in ("REPLY", "ACCEPTED", "FAILED", "error", "failed", "waiting", "not logged in"))]
+    status = "OK" if age < 6 and not any("error" in e or "FAILED" in e or "failed" in e for e in events) else "ATTENTION"
+    print(f"{status} | heartbeat {age:.0f} min ago | sent today {sent} | applied {counts.get('applied', 0)} | "
+          f"replied {counts.get('replied', 0)} | queued {counts.get('queued', 0)} | failed {counts.get('failed', 0)}"
+          f"{' | PAUSED' if (DATA / 'paused').exists() else ''}")
+    for e in events[-15:]:
+        print("  " + e[:220])
+
+
 def main() -> None:
     args = sys.argv[1:] or ["status"]
     cmd = args[0]
@@ -87,6 +109,8 @@ def main() -> None:
             print(f"{row['source']} {row['status']:8} {row['n']}")
         print("\nlatest activity:")
         show_rows(store.rows("status in ('applied','draft','failed','rejected')"), 15)
+    elif cmd == "health":
+        health()
     elif cmd == "draft":
         from . import llm
         cfg, store = load_config(), Store()
