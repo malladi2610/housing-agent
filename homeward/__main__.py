@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from .core import DATA, ROOT, Store, km_to_work, listing_from_row, load_config
+from .core import DATA, ROOT, SOURCES, Store, km_to_work, listing_from_row, load_config
 
 LABEL = "com.homeward.agent"
 PLIST = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
@@ -73,7 +73,7 @@ def health() -> None:
     beat = DATA / "heartbeat"
     age = (datetime.now() - datetime.fromisoformat(beat.read_text())).total_seconds() / 60 if beat.exists() else 1e9
     counts = {r["status"]: r["n"] for r in store.db.execute("select status, count(*) n from listings group by 1")}
-    sent = sum(store.sent_today(s) for s in ("fff", "wgg"))
+    sent = sum(store.sent_today(s) for s in SOURCES)
     log, mark = DATA / "homeward.log", DATA / "health.offset"
     lines = log.read_text().splitlines() if log.exists() else []
     start = int(mark.read_text()) if mark.exists() else max(0, len(lines) - 50)
@@ -100,9 +100,9 @@ def main() -> None:
         else:
             agent.poll()
             store = agent.store
-            print("NEW:"); show_rows(store.queue("fff", False) + store.queue("wgg", False))
+            print("NEW:"); show_rows([r for s in SOURCES for r in store.queue(s, False)])
             print("\nBACKLOG (next first):")
-            show_rows(sorted(store.queue("fff", True) + store.queue("wgg", True), key=lambda r: r["score"]), 40)
+            show_rows(sorted([r for s in SOURCES for r in store.queue(s, True)], key=lambda r: r["score"]), 40)
     elif cmd == "status":
         store = Store()
         for row in store.db.execute("select source, status, count(*) n from listings group by 1,2 order by 1,2"):

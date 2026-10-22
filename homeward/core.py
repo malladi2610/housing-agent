@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
+SOURCES = {"fff": "Flatsforfriendz", "wgg": "WG-Gesucht", "ka": "Kleinanzeigen", "is24": "ImmoScout24", "iw": "immowelt"}
 
 
 def load_config() -> dict:
@@ -23,7 +24,7 @@ def load_config() -> dict:
 
 @dataclass
 class Listing:
-    source: str          # "fff" | "wgg"
+    source: str          # a key of SOURCES
     id: str
     url: str
     title: str = ""
@@ -44,7 +45,8 @@ class Listing:
 
     def summary(self) -> str:
         period = f"{self.start or '?'} → {self.end or 'open-ended'}"
-        return f"{self.kind} · {self.district} · €{self.rent} · {self.size} · {period}"
+        notes = [self.extra.get("rent_note", ""), "approx. location" if self.extra.get("approx") else ""]
+        return " · ".join([f"{self.kind} · {self.district} · €{self.rent} · {self.size} · {period}"] + [n for n in notes if n])
 
 
 # ---------- parsing helpers ----------

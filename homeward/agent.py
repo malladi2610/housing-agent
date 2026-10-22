@@ -1,13 +1,18 @@
 """The loop: poll -> filter -> queue -> (read, judge+write with Ollama, send) -> notify."""
 from __future__ import annotations
 
+import json
 import random
 import subprocess
 import time
 from datetime import datetime
 
-from . import llm, sources
-from .core import DATA, Listing, Store, check, km_to_work, listing_from_row, load_config, log
+from . import llm, more, sources
+from .core import DATA, SOURCES, Listing, Store, check, km_to_work, listing_from_row, load_config, log
+
+CFG_KEY = {"fff": "flatsforfriendz", "wgg": "wg_gesucht", "ka": "kleinanzeigen", "is24": "immoscout", "iw": "immowelt"}
+ENRICH = {"wgg": sources.enrich_wgg, "ka": more.enrich_ka, "is24": more.enrich_is24, "iw": more.enrich_iw}
+BROWSER = ("is24", "iw")  # discovered through the bot Chrome: polled less often
 
 
 def title_key(title: str) -> str:
@@ -29,7 +34,11 @@ class Agent:
         self.http = sources.client()
         self._phone = None
         self.last_backlog: dict[str, float] = {}
+        self.next_poll: dict[str, float] = {}
         self.last_replies = 0.0
+
+    def enabled(self, src: str) -> bool:
+        return bool(self.cfg["sources"].get(CFG_KEY[src], False))
 
     @property
     def phone(self):
@@ -42,37 +51,48 @@ class Agent:
 
     def poll(self) -> int:
         cfg, new = self.cfg, 0
-        batches = []
-        if cfg["sources"]["flatsforfriendz"]:
-            batches.append(("fff", sources.fetch_fff))
-        if cfg["sources"]["wg_gesucht"]:
-            batches.append(("wgg", lambda c: sources.fetch_wgg(c, cfg["sources"]["wg_gesucht_pages"],
-                                                                cfg["search"]["max_rent"])))
-        for src, fetch in batches:
+        s, rmax = cfg["sources"], cfg["search"]["max_rent"]
+        fetchers = {
+            "fff": sources.fetch_fff,
+            "wgg": lambda c: sources.fetch_wgg(c, s["wg_gesucht_pages"], rmax),
+            "ka": lambda c: more.fetch_ka(c, rmax),
+            "is24": lambda c: more.fetch_is24(s.get("immoscout_pages", 1), rmax),
+            "iw": lambda c: more.fetch_iw(s.get("immowelt_pages", 1), rmax),
+        }
+        for src, fetch in fetchers.items():
+            if not self.enabled(src) or time.time() < self.next_poll.get(src, 0):
+                continue
+            if src in BROWSER:
+                self.next_poll[src] = time.time() + s.get("browser_poll_minutes", 15) * 60
             try:
                 listings = fetch(self.http)
+                first_run = not self.store.has_source(src)
+                for l in listings:
+                    if not self.store.known(l.key):
+                        new += self._consider(l, backlog=first_run)
             except Exception as e:
                 log(f"[{src}] poll failed: {e}")
+                if str(e).startswith("blocked:"):  # CAPTCHA / bot check: back off, never try to solve it
+                    self.next_poll[src] = time.time() + 3600
+                    notify("Homeward: bot check", f"{SOURCES[src]} shows a CAPTCHA, pausing it for 1 h")
                 continue
-            first_run = not self.store.has_source(src)
-            for l in listings:
-                if self.store.known(l.key):
-                    continue
-                new += self._consider(l, backlog=first_run)
             if first_run:
                 log(f"[{src}] first snapshot: {len(listings)} listings, backlog queued")
         return new
 
     def _consider(self, l: Listing, backlog: bool) -> int:
-        reason = check(l, self.cfg, need_location=l.source == "fff")
-        if not reason and l.source == "wgg":
+        extra = more.skip if l.source in ("ka", "is24", "iw") else (lambda _: None)
+        reason = extra(l) or (None if l.source == "ka" else check(l, self.cfg, need_location=l.source == "fff"))
+        if not reason and l.source in ENRICH:
             try:
-                sources.enrich_wgg(self.http, l)
+                ENRICH[l.source](self.http, l)
                 time.sleep(1)
             except Exception as e:
-                log(f"[wgg] detail fetch failed for {l.id}: {e}")
+                if str(e).startswith("blocked:"):
+                    raise
+                log(f"[{l.source}] detail fetch failed for {l.id}: {e}")
                 return 0  # unknown -> retry on the next poll
-            reason = check(l, self.cfg)
+            reason = extra(l) or check(l, self.cfg)
         if reason:
             self.store.add(l, self.cfg, "skipped", reason, backlog)
             return 0
@@ -88,21 +108,30 @@ class Agent:
         if PAUSE.exists():
             return
         run = self.cfg["run"]
-        enabled = {"fff": self.cfg["sources"]["flatsforfriendz"], "wgg": self.cfg["sources"]["wg_gesucht"]}
-        for src in ("fff", "wgg"):
-            if not enabled[src] or self.store.sent_today(src) >= run["daily_cap"]:
+        for src in SOURCES:
+            if not self.enabled(src) or self.store.sent_today(src) >= run["daily_cap"]:
                 continue
-            todo = self.store.queue(src, backlog=False)
+            todo = [r for r in self.store.queue(src, backlog=False) if not self._waiting(r)]
             lo, hi = run["backlog_hours"]
             due = time.time() - self.last_backlog.get(src, 0) >= run["backlog_every_minutes"] * 60
             if not todo and due and lo <= datetime.now().hour < hi:
-                todo = self.store.queue(src, backlog=True)[:1]
+                todo = [r for r in self.store.queue(src, backlog=True) if not self._waiting(r)][:1]
                 self.last_backlog[src] = time.time()
             for row in todo:
                 if self.store.sent_today(src) >= run["daily_cap"]:
                     break
                 if not self.apply(row):
                     break  # source unavailable (phone locked, logged out): try again next tick
+
+    def _waiting(self, row) -> bool:
+        """ImmoScout24 lets only MieterPlus members contact during a listing's first days."""
+        if row["source"] != "is24" or self.cfg["sources"].get("immoscout_mieterplus"):
+            return False
+        until = json.loads(row["data"])["extra"].get("paywall_until")
+        try:
+            return bool(until) and datetime.fromisoformat(until) > datetime.now().astimezone()
+        except ValueError:
+            return False
 
     def apply(self, row) -> bool:
         """Returns False when the source itself is unavailable."""
@@ -139,17 +168,17 @@ class Agent:
                 self.phone.home()
             else:
                 from .wgg import send
-                send(l, msg)
-                self.store.set_contact(l.key, title_key(l.title))
+                {"wgg": send, "ka": more.send_ka, "is24": more.send_is24, "iw": more.send_iw}[l.source](l, msg)
+                self.store.set_contact(l.key, l.id if l.source == "ka" else title_key(l.title))
             self.store.set(l.key, "applied", verdict.get("model", ""), msg)
             log(f"[{l.source}] APPLIED {km} km €{l.rent} {l.district} {l.url}")
             notify("Homeward: applied ✓", f"{km} km · €{l.rent} · {l.district}")
         except (PhoneError, WggError) as e:
             text = str(e)
-            if "already contacted" in text or text.startswith("skip:"):
+            if "already contacted" in text or text.startswith(("skip:", "wait:")):
                 self.store.set(l.key, "skipped", text)
-            elif "not logged in" in text:
-                log(f"[wgg] {text}")
+            elif "not logged in" in text or text.startswith("blocked:"):
+                log(f"[{l.source}] {text}")
                 notify("Homeward needs you", text)
                 return False
             else:
@@ -177,6 +206,8 @@ class Agent:
             self._replies_fff()
         if self.cfg["sources"]["wg_gesucht"]:
             self._replies_wgg()
+        if self.enabled("ka"):
+            self._replies_ka()
 
     def _replies_fff(self) -> None:
         try:
@@ -217,6 +248,19 @@ class Agent:
             if first or changed is False or r["mine"]:
                 continue
             self._reply("wgg", r["name"].split(" (")[0], title_key(r["title"]), r["preview"])
+
+    def _replies_ka(self) -> None:
+        try:
+            first = not self.store.has_threads("ka")
+            rows = more.inbox_ka()
+        except Exception as e:
+            log(f"[ka] reply check failed: {type(e).__name__}: {e}")
+            return
+        for r in rows:
+            changed = self.store.thread_changed("ka", r["id"], r["last"], r["preview"])
+            if first or changed is False or r["mine"]:
+                continue
+            self._reply("ka", r["name"], r["ad"], r["preview"])  # contact = ad id, set when we applied
 
     def _reply(self, src: str, name: str, contact: str, text: str) -> None:
         n = self.store.mark_contact(src, contact, "replied", text[:200])

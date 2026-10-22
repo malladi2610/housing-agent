@@ -7,7 +7,7 @@ from datetime import date
 
 import httpx
 
-from .core import Listing
+from .core import SOURCES, Listing
 
 PROMPT = """You help {first_name} find a home in Munich. Read the listing, decide if it fits,
 and if it does, write the first message to the advertiser.
@@ -47,7 +47,7 @@ def assess(l: Listing, cfg: dict, km: float | None) -> dict:
     prompt = PROMPT.format(
         first_name=me["first_name"], about=me["about"].strip(), target=s["target_move_in"],
         latest=s["latest_move_in"], min_months=s["min_months"], today=date.today().isoformat(),
-        source="Flatsforfriendz" if l.source == "fff" else "WG-Gesucht", km=km,
+        source=SOURCES.get(l.source, l.source), km=km,
         summary=l.summary(), title=l.title, text=l.text or "(no description available)",
     )
     last = None

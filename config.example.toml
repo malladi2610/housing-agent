@@ -32,6 +32,13 @@ ollama_url = "http://localhost:11434"
 flatsforfriendz = true
 wg_gesucht = true
 wg_gesucht_pages = 2         # search pages polled per tick (newest first)
+kleinanzeigen = false        # plain HTTP; sending + replies need a Kleinanzeigen login in the bot Chrome
+immoscout = false            # via the bot Chrome (log in there); CAPTCHA-prone, keep the interval high
+immoscout_pages = 1
+immoscout_mieterplus = false # without MieterPlus, new private listings are contacted once their paywall ends
+immowelt = false             # via the bot Chrome (log in there so the contact form is prefilled)
+immowelt_pages = 1
+browser_poll_minutes = 15    # poll interval for the bot-Chrome sources (ImmoScout24, immowelt)
 
 [phone]
 package = "com.flatsforfriendz.app"   # set by `homeward phone` after calibration

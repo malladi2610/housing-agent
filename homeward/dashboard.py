@@ -6,7 +6,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .core import DATA, Store
+from .core import DATA, SOURCES, Store
 
 PAUSE = DATA / "paused"
 PORT = 8765
@@ -40,11 +40,11 @@ button{font:inherit;padding:6px 14px;border-radius:8px;border:1px solid var(--li
 def render() -> str:
     store = Store()
     counts = {r["status"]: r["n"] for r in store.db.execute("select status, count(*) n from listings group by 1")}
-    sent_today = sum(store.sent_today(s) for s in ("fff", "wgg"))
+    sent_today = sum(store.sent_today(s) for s in SOURCES)
     paused = PAUSE.exists()
     out = [f"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
            f"<meta http-equiv=refresh content=30><title>Homeward</title><style>{CSS}</style></head><body><main>",
-           "<h1>Homeward</h1><div class=muted>Flatsforfriendz + WG-Gesucht · ≤ 6 km from MTZ · refreshes every 30 s</div>",
+           "<h1>Homeward</h1><div class=muted>≤ 6 km from MTZ · refreshes every 30 s</div>",
            "<form method=post action=/toggle style='margin-top:12px'>",
            f"<span class={'paused' if paused else 'muted'}>{'Sending PAUSED' if paused else 'Sending is on'}</span> &nbsp;"
            f"<button>{'Resume sending' if paused else 'Pause sending'}</button></form><div class=stats>"]
@@ -66,7 +66,7 @@ def render() -> str:
             if r["message"]:
                 detail += f"<details><summary>message</summary><pre>{html.escape(r['message'])}</pre></details>"
             out.append(f"<tr class={'reply' if r['status'] == 'replied' else ''}>"
-                       f"<td><span class=src>{'FFF' if r['source'] == 'fff' else 'WGG'}</span></td>"
+                       f"<td><span class=src>{r['source'].upper()}</span></td>"
                        f"<td>{r['km'] or ''}</td><td><a href='{html.escape(r['url'])}' target=_blank>{name}</a>"
                        f"<div class=muted>{html.escape(r['summary'])}</div></td>"
                        f"<td class=muted>{r['updated'][5:16].replace('T', ' ')}</td><td>{detail}</td></tr>")
