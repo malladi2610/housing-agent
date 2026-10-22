@@ -188,10 +188,12 @@ class Agent:
         except llm.ModelError as e:
             log(f"[llm] {e}")  # stays queued
             return False
-        except Exception as e:  # device disconnects etc.: keep queued, retry later
+        except Exception as e:
             log(f"[{l.source}] error on {l.id}: {type(e).__name__}: {e}")
-            self._phone = None
-            return False
+            if l.source == "fff":  # device disconnects etc.: keep queued, retry later
+                self._phone = None
+                return False
+            self.store.set(l.key, "failed", f"{type(e).__name__}: {str(e)[:150]}")  # never loop on one listing
         return True
 
     # ---------- replies ----------

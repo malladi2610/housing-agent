@@ -80,8 +80,9 @@ class Phone:
         time.sleep(0.8)
         if (box.get_text() or "").strip()[:40] != message[:1000].strip()[:40]:
             raise PhoneError("composer text mismatch, not sending")
-        d.press("back")  # hide keyboard so the send button is tappable
-        time.sleep(0.8)
+        if "mInputShown=true" in d.shell("dumpsys input_method").output:
+            d.press("back")  # hide the keyboard so the send button is tappable (Back without it closes the sheet)
+            time.sleep(0.8)
         btn = d(description=SEND)
         if not btn.exists:
             raise PhoneError("send button not found")

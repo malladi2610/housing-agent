@@ -77,6 +77,8 @@ def send(l: Listing, message: str) -> None:
             _dismiss_cookies(page)
             if "modal=sign_in" in page.url or page.locator("#login_form:visible").count():
                 raise WggError("not logged in - run `homeward login`")
+            if page.locator("text=/Anzeige ist bereits gelöscht|Anzeige ist deaktiviert/").count():
+                raise WggError("skip: ad deleted")
             if page.locator("text=bereits eine Nachricht").count():
                 raise WggError("already contacted")
             if page.locator("text=HousingAnywhere").count():

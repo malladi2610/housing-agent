@@ -10,7 +10,7 @@ from datetime import date
 
 import httpx
 
-from .core import DATA, Listing, parse_euro
+from .core import DATA, Listing, load_config, parse_euro
 from .sources import _text
 from .wgg import WggError, _dismiss_cookies, ensure_browser
 
@@ -233,6 +233,13 @@ def send_ka(l: Listing, message: str) -> None:
         page.wait_for_timeout(1500)
         # new layout: unnamed fields in a modal block; classic layout: #viewad-contact-modal-form
         form = page.locator("#viewad-contact-modal-form, div:has(textarea:visible):has(button:has-text('Nachricht senden'))").last
+        me = load_config()["me"]
+        for label, value in (("Vorname", me.get("first_name", "")), ("Nachname", me.get("last_name", ""))):
+            field = form.get_by_label(re.compile(rf"^{label}"))  # landlord-style form: required name fields
+            if field.count() and not field.first.input_value().strip():
+                if not value:
+                    raise SiteError(f"Kleinanzeigen form needs {label} - set [me] last_name in config.toml, not sending")
+                field.first.fill(value)
         name = form.locator("input[name=contactName], input[type=text]").first
         if name.count() and not name.input_value().strip():
             raise SiteError("Kleinanzeigen contact name is empty (set a profile name), not sending")
