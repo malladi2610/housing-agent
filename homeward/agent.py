@@ -142,6 +142,7 @@ class Agent:
         l, cfg = listing_from_row(row), self.cfg
         km = km_to_work(l, cfg)
         try:
+            host = ""
             if l.source == "fff":
                 if why := self.phone.ready():
                     log(f"[fff] waiting: {why}")
@@ -152,6 +153,11 @@ class Agent:
                 if host:
                     l.text = f"Host: {host}\n{l.text}"
                     self.store.set_contact(l.key, host)
+            contact = host if l.source == "fff" else (l.id if l.source == "ka" else title_key(l.title))
+            if dup := self.store.duplicate_of(l, contact or ""):
+                self.store.set(l.key, "skipped", f"duplicate of {dup}")
+                log(f"[{l.source}] skipped {l.id}: duplicate of {dup}")
+                return True
             verdict = llm.assess(l, cfg, km)
             if not verdict.get("fit"):
                 self.store.set(l.key, "rejected", f"model: {verdict.get('reason', '')}")

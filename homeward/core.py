@@ -179,6 +179,19 @@ class Store:
             return None
         return (old["seen_when"], old["preview"]) != (when, preview)
 
+    def duplicate_of(self, l: Listing, contact: str) -> str | None:
+        """An already-contacted listing that is the same flat (exact spot + rent, any site)
+        or the same advertiser in the same district (same site)."""
+        q = ("select url from listings where status in ('applied','replied','closed') and key != ? and ("
+             "(source = ? and contact != '' and contact = ? and json_extract(data, '$.district') = ?)")
+        args = [l.key, l.source, " ".join(contact.split()), l.district]
+        if l.lat is not None and l.lng is not None and not l.extra.get("approx"):
+            q += (" or (abs(json_extract(data, '$.lat') - ?) < 0.0003 and abs(json_extract(data, '$.lng') - ?) < 0.0004"
+                  " and json_extract(data, '$.rent') = ? and not coalesce(json_extract(data, '$.extra.approx'), 0))")
+            args += [l.lat, l.lng, l.rent]
+        row = self.db.execute(q + ") limit 1", args).fetchone()
+        return row["url"] if row else None
+
     def has_threads(self, source: str) -> bool:
         return self.db.execute("select 1 from threads where source=? limit 1", (source,)).fetchone() is not None
 
