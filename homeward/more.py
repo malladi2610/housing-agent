@@ -228,14 +228,16 @@ def send_ka(l: Listing, message: str) -> None:
         if (page.locator(".viewad-contact-button-login:visible").count() or "login.kleinanzeigen" in page.url
                 or page.get_by_text("Einloggen", exact=True).first.is_visible()):  # classic / new layout
             raise SiteError("not logged in to Kleinanzeigen - log in once in the bot Chrome")
-        page.locator("button:visible", has_text=re.compile(r"Nachricht (schreiben|senden)")).first.click()
+        btn = page.locator("#viewad-contact-button:visible")
+        (btn if btn.count() else page.locator("button:visible", has_text=re.compile(r"Nachricht schreiben"))).first.click()
         page.wait_for_timeout(1500)
-        form = page.locator("#viewad-contact-modal-form, form:has(textarea[name=message])").first
-        name = form.locator("input[name=contactName]")
-        if name.count() and not name.first.input_value().strip():
+        # new layout: unnamed fields in a modal block; classic layout: #viewad-contact-modal-form
+        form = page.locator("#viewad-contact-modal-form, div:has(textarea:visible):has(button:has-text('Nachricht senden'))").last
+        name = form.locator("input[name=contactName], input[type=text]").first
+        if name.count() and not name.input_value().strip():
             raise SiteError("Kleinanzeigen contact name is empty (set a profile name), not sending")
-        _fill(form.locator("textarea[name=message]").first, message)
-        form.locator("button[type=submit]", has_text=re.compile("senden", re.I)).first.click()
+        _fill(form.locator("textarea:visible").first, message)
+        form.locator("button", has_text=re.compile(r"senden", re.I)).last.click()
         # classic layout: .j-viewad-contact-success becomes visible ("Zu meinen Nachrichten")
         _confirm(page, r"Nachricht (wurde )?(erfolgreich )?(gesendet|versendet|verschickt)|Zu meinen Nachrichten",
                  ".j-viewad-contact-error, .ajaxform-fielderror:not(.is-hidden)")
