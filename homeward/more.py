@@ -240,7 +240,7 @@ def send_ka(l: Listing, message: str) -> None:
                 if not value:
                     raise SiteError(f"Kleinanzeigen form needs {label} - set [me] last_name in config.toml, not sending")
                 field.first.fill(value)
-        name = form.locator("input[name=contactName], input[type=text]").first
+        name = form.locator("input[name=contactName]").or_(form.get_by_label(re.compile(r"^(Profilname|Vorname)"))).first
         if name.count() and not name.input_value().strip():
             raise SiteError("Kleinanzeigen contact name is empty (set a profile name), not sending")
         _fill(form.locator("textarea:visible").first, message)
