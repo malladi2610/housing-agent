@@ -108,8 +108,9 @@ class Agent:
         if PAUSE.exists():
             return
         run = self.cfg["run"]
+        allowed = run.get("auto_apply", ["fff", "wgg"])  # other enabled sources only search + queue
         for src in SOURCES:
-            if not self.enabled(src) or self.store.sent_today(src) >= run["daily_cap"]:
+            if not self.enabled(src) or src not in allowed or self.store.sent_today(src) >= run["daily_cap"]:
                 continue
             todo = [r for r in self.store.queue(src, backlog=False) if not self._waiting(r)]
             lo, hi = run["backlog_hours"]
