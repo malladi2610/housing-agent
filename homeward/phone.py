@@ -68,13 +68,15 @@ class Phone:
         el = self.d(descriptionStartsWith="Message ")
         return el.info["contentDescription"].removeprefix("Message ").strip() if el.exists else ""
 
-    def send(self, message: str) -> None:
+    def send(self, message: str) -> str | None:
         d = self.d
         d(descriptionStartsWith="Message ").click()
         if d(description=FREE_OPTION).wait(timeout=6):
             d(description=FREE_OPTION).click()
         box = d(className="android.widget.EditText")
         if not box.wait(timeout=10):
+            if d(descriptionMatches="(?i).*already requested.*").exists:
+                return "access requested without a message (this listing has no composer)"
             raise PhoneError("composer did not open")
         box.set_text(message[:1000])
         time.sleep(0.8)

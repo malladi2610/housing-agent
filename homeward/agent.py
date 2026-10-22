@@ -165,8 +165,12 @@ class Agent:
                 return True
             if l.source == "fff":
                 self.phone.open(l)  # back to the top of the listing before messaging
-                self.phone.send(msg)
+                note = self.phone.send(msg)
                 self.phone.home()
+                if note:
+                    self.store.set(l.key, "applied", note, "")
+                    log(f"[fff] APPLIED ({note}) {km} km €{l.rent} {l.district} {l.url}")
+                    return True
             else:
                 from .wgg import send
                 {"wgg": send, "ka": more.send_ka, "is24": more.send_is24, "iw": more.send_iw}[l.source](l, msg)
