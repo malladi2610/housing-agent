@@ -23,6 +23,7 @@ send = true                  # false = only notify with drafts
 daily_cap = 40               # max messages per source per day
 backlog_every_minutes = 6    # pace for listings that existed before the first run
 backlog_hours = [8, 22]      # backlog only during the day; new listings anytime
+reply_check_minutes = 10     # scan the app's Chat tab for replies
 model = "kimi-k3:cloud"
 fallback_model = "glm-5.2:cloud"
 ollama_url = "http://localhost:11434"

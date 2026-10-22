@@ -24,6 +24,7 @@ class Agent:
         self.http = sources.client()
         self._phone = None
         self.last_backlog: dict[str, float] = {}
+        self.last_replies = 0.0
 
     @property
     def phone(self):
@@ -111,6 +112,7 @@ class Agent:
                 host = self.phone.host()
                 if host:
                     l.text = f"Host: {host}\n{l.text}"
+                    self.store.set_contact(l.key, host)
             verdict = llm.assess(l, cfg, km)
             if not verdict.get("fit"):
                 self.store.set(l.key, "rejected", f"model: {verdict.get('reason', '')}")
@@ -152,6 +154,37 @@ class Agent:
             return False
         return True
 
+    # ---------- replies ----------
+
+    PENDING = ("Thanks for your request", "Danke für deine Anfrage")
+
+    def check_replies(self) -> None:
+        every = self.cfg["run"].get("reply_check_minutes", 10) * 60
+        if not self.cfg["sources"]["flatsforfriendz"] or time.time() - self.last_replies < every:
+            return
+        self.last_replies = time.time()
+        try:
+            if self.phone.ready():
+                return
+            first = not self.store.has_threads("fff")
+            rows = self.phone.chats()
+            self.phone.home()
+        except Exception as e:
+            log(f"[fff] reply check failed: {type(e).__name__}: {e}")
+            self._phone = None
+            return
+        for r in rows:
+            changed = self.store.thread_changed("fff", r["name"], r["when"], r["preview"])
+            if first or changed is False or r["preview"].startswith(self.PENDING):
+                continue
+            name, text = " ".join(r["name"].split()), r["preview"].replace("\n", " ")
+            if "no longer active" in text or "nicht mehr aktiv" in text:
+                self.store.mark_contact("fff", name, "closed", text[:120])
+                continue
+            n = self.store.mark_contact("fff", name, "replied", text[:200])
+            log(f"[fff] REPLY from {name}: {text[:300]}")
+            notify(f"Homeward: reply from {name}", text if n else f"(chat not from the bot) {text}")
+
     # ---------- main loop ----------
 
     def tick(self) -> None:
@@ -159,6 +192,7 @@ class Agent:
         if n:
             log(f"{n} new matching listing(s)")
         self.work()
+        self.check_replies()
 
     def run(self) -> None:
         log(f"homeward started (send={'off' if self.dry else 'on'})")

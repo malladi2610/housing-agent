@@ -8,6 +8,7 @@ Flow (calibrated on app v3.8.1, Galaxy S23):
 from __future__ import annotations
 
 import time
+import xml.etree.ElementTree as ET
 
 import uiautomator2 as u2
 
@@ -39,10 +40,13 @@ class Phone:
 
     def open(self, l: Listing) -> None:
         self.d.shell(f"am start -W -a android.intent.action.VIEW -d '{l.url}' {PKG}")
-        if not self.d(descriptionStartsWith="Message ").wait(timeout=15):
-            if self.d(textContains="Request sent").exists or self.d(textContains="Anfrage gesendet").exists:
+        for _ in range(15):
+            if self.d(descriptionStartsWith="Message ").exists:
+                return
+            if self.d(descriptionMatches="(?i).*already requested.*|.*bereits angefragt.*").exists:
                 raise PhoneError("already contacted")
-            raise PhoneError("listing screen did not load (no 'Message' button)")
+            time.sleep(1)
+        raise PhoneError("listing screen did not load (no 'Message' button)")
 
     def read(self, max_scrolls: int = 8) -> str:
         """Collect all visible text of the listing, scrolling down until nothing new appears."""
@@ -86,6 +90,34 @@ class Phone:
         if not box.wait_gone(timeout=15):
             raise PhoneError("composer still open after send (uncertain)")
         time.sleep(1.5)
+
+    def tab(self, name: str) -> None:
+        """Go to a bottom-navigation tab (Explore, Guide, Home, Chat, Profile)."""
+        self.d.app_start(PKG)
+        for _ in range(6):
+            tab = self.d(description=name, className="android.view.View")
+            if tab.exists:
+                tab.click()
+                time.sleep(2.5)
+                return
+            self.d.press("back")
+            time.sleep(1)
+        raise PhoneError(f"could not reach the {name} tab")
+
+    def chats(self) -> list[dict]:
+        """Rows of the Chat tab (newest first): name, time, last-message preview."""
+        self.tab("Chat")
+        if self.d(description="All").click_exists(timeout=3):
+            time.sleep(2)
+        rows = []
+        for node in ET.fromstring(self.d.dump_hierarchy()).iter("node"):
+            if node.get("clickable") != "true" or node.get("package") != PKG:
+                continue
+            texts = [c.get("text", "").strip() for c in node.iter("node")
+                     if c.get("class") == "android.widget.TextView" and c.get("text", "").strip()]
+            if 3 <= len(texts) <= 5:
+                rows.append({"name": texts[0], "when": texts[1], "preview": texts[-1]})
+        return rows
 
     def home(self) -> None:
         self.d.press("home")

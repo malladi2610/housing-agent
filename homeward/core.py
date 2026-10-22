@@ -125,8 +125,15 @@ class Store:
               km real, score real, status text, reason text, message text,
               backlog integer, data text, first_seen text, updated text);
             create index if not exists by_status on listings(status, score);
+            create table if not exists threads (
+              source text, name text, seen_when text, preview text, updated text,
+              primary key (source, name));
             """
         )
+        try:
+            self.db.execute("alter table listings add column contact text default ''")
+        except sqlite3.OperationalError:
+            pass  # already there
 
     def has_source(self, source: str) -> bool:
         return self.db.execute("select 1 from listings where source=? limit 1", (source,)).fetchone() is not None
@@ -152,6 +159,33 @@ class Store:
             self.db.execute("update listings set status=?, reason=?, message=?, updated=? where key=?",
                             (status, reason, message, now, key))
         self.db.commit()
+
+    def set_contact(self, key: str, contact: str) -> None:
+        self.db.execute("update listings set contact=? where key=?", (" ".join(contact.split()), key))
+        self.db.commit()
+
+    def thread_changed(self, source: str, name: str, when: str, preview: str) -> bool | None:
+        """Store the latest chat row; True if it changed, None if never seen before."""
+        name = " ".join(name.split())
+        old = self.db.execute("select seen_when, preview from threads where source=? and name=?",
+                              (source, name)).fetchone()
+        now = datetime.now().isoformat(timespec="seconds")
+        self.db.execute("insert or replace into threads values (?,?,?,?,?)", (source, name, when, preview, now))
+        self.db.commit()
+        if old is None:
+            return None
+        return (old["seen_when"], old["preview"]) != (when, preview)
+
+    def has_threads(self, source: str) -> bool:
+        return self.db.execute("select 1 from threads where source=? limit 1", (source,)).fetchone() is not None
+
+    def mark_contact(self, source: str, name: str, status: str, reason: str) -> int:
+        name = " ".join(name.split())
+        now = datetime.now().isoformat(timespec="seconds")
+        n = self.db.execute("update listings set status=?, reason=?, updated=? where source=? and contact=?",
+                            (status, reason, now, source, name)).rowcount
+        self.db.commit()
+        return n
 
     def queue(self, source: str, backlog: bool) -> list[sqlite3.Row]:
         return self.db.execute(
