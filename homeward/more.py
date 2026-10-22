@@ -254,7 +254,7 @@ def send_ka(l: Listing, message: str) -> None:
         _fill(form.locator("textarea:visible").first, message)
         form.locator("button", has_text=re.compile(r"senden", re.I)).last.click()
         # classic layout: .j-viewad-contact-success becomes visible ("Zu meinen Nachrichten")
-        _confirm(page, r"Nachricht (wurde )?(erfolgreich )?(gesendet|versendet|verschickt)|Zu meinen Nachrichten",
+        _confirm(page, r"Nachricht (wurde )?(erfolgreich )?(gesendet|versendet|verschickt)|Erfolgreich (gesendet|versendet)|Zu meinen Nachrichten|Successfully sent|Message sent",
                  ".j-viewad-contact-error, .ajaxform-fielderror:not(.is-hidden)")
 
 
