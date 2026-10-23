@@ -72,7 +72,7 @@ def render() -> str:
                        f"<td class=muted>{r['updated'][5:16].replace('T', ' ')}</td><td>{detail}</td></tr>")
         out.append("</table></div>")
     log = (DATA / "homeward.log")
-    tail = log.read_text().splitlines()[-40:] if log.exists() else []
+    tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-40:] if log.exists() else []
     out.append("<h2>Log</h2><div class=log>" + html.escape("\n".join(reversed(tail))) + "</div></main></body></html>")
     return "".join(out)
 
