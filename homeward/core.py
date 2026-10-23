@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
+import subprocess
+import sys
 import tomllib
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
@@ -19,7 +22,7 @@ def load_config() -> dict:
     path = ROOT / "config.toml"
     if not path.exists():
         path = ROOT / "config.example.toml"
-    return tomllib.loads(path.read_text())
+    return tomllib.loads(path.read_text(encoding="utf-8"))  # explicit: Windows defaults to cp1252
 
 
 @dataclass
@@ -230,5 +233,26 @@ def log(msg: str) -> None:
     line = f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}"
     print(line, flush=True)
     DATA.mkdir(exist_ok=True)
-    with open(DATA / "homeward.log", "a") as f:
+    with open(DATA / "homeward.log", "a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+# PowerShell balloon tip; title/body come in through env vars so no quoting is needed.
+WIN_NOTIFY = ("Add-Type -AssemblyName System.Windows.Forms; $n = New-Object System.Windows.Forms.NotifyIcon; "
+              "$n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; "
+              "$n.ShowBalloonTip(10000, $env:HW_TITLE, $env:HW_BODY, 'Info'); Start-Sleep 10; $n.Dispose()")
+
+
+def notify(title: str, body: str) -> None:
+    """Desktop notification (macOS / Windows). Best effort: never let a notification stop the bot."""
+    body = body.replace('"', "'")[:200]
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["osascript", "-e", f'display notification "{body}" with title "{title}" sound name "Glass"'],
+                           check=False, capture_output=True)
+        elif sys.platform == "win32":  # Popen: the balloon stays up 10 s, don't wait for it
+            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", WIN_NOTIFY],
+                             env={**os.environ, "HW_TITLE": title, "HW_BODY": body},
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+    except OSError:
+        pass

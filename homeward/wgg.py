@@ -6,9 +6,13 @@ localhost-only debugging port, and Playwright attaches to it to send messages.
 """
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
+import sys
 import time
+from pathlib import Path
 
 import httpx
 from playwright.sync_api import TimeoutError as PWTimeout, sync_playwright
@@ -16,13 +20,27 @@ from playwright.sync_api import TimeoutError as PWTimeout, sync_playwright
 from .core import DATA, Listing
 
 PROFILE = DATA / "browser"
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PORT = 9333
 LOGIN_URL = "https://www.wg-gesucht.de/mein-wg-gesucht.html"
 
 
 class WggError(RuntimeError):
     pass
+
+
+def chrome_path() -> str:
+    """The installed Google Chrome (the bot uses the real Chrome, not Playwright's bundled browser)."""
+    if sys.platform == "darwin":
+        candidates = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+    elif sys.platform == "win32":  # per-machine install, or per-user install under LOCALAPPDATA
+        candidates = [os.path.join(os.environ.get(v, ""), r"Google\Chrome\Application\chrome.exe")
+                      for v in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA")]
+    else:
+        candidates = [shutil.which(n) or "" for n in ("google-chrome", "google-chrome-stable", "chromium")]
+    for c in candidates:
+        if c and Path(c).is_file():
+            return c
+    raise WggError("Google Chrome not found - install it from google.com/chrome")
 
 
 def ensure_browser() -> str:
@@ -34,7 +52,7 @@ def ensure_browser() -> str:
     except httpx.HTTPError:
         pass
     PROFILE.mkdir(parents=True, exist_ok=True)
-    subprocess.Popen([CHROME, f"--user-data-dir={PROFILE}", f"--remote-debugging-port={PORT}",
+    subprocess.Popen([chrome_path(), f"--user-data-dir={PROFILE}", f"--remote-debugging-port={PORT}",
                       "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check",
                       LOGIN_URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(30):

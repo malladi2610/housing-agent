@@ -1,52 +1,75 @@
 # Homeward
 
-A small background agent that finds rooms/studios near work in Munich and applies immediately.
+A small background bot that looks for a room or studio in Munich close to work, and messages the
+advertiser within minutes of a listing going online.
 
-```
-every ~60 s:
-  Flatsforfriendz  one HTTP GET -> all ~375 Munich offers incl. coordinates
-  WG-Gesucht       newest-first search (rent pre-filtered) -> detail page for coordinates + text
-  Kleinanzeigen    WG + flat searches over HTTP -> ad page (embedded JSON) for coordinates + text   (opt-in)
-  ImmoScout24      result-list model + exposé, loaded in the bot Chrome; MieterPlus-only days skipped (opt-in)
-  immowelt         search cards + exposé JSON in the bot Chrome; swaps / WBS-only skipped           (opt-in)
-        |
-  Python filters   <= 6 km straight-line to MTZ, <= €850, move-in <= 1 Jan, >= 6 months
-                   flats: warm + €70 power/internet, or cold + €200 (marked as an estimate)
-  ranking          km + price + lateness (lower = better); brand-new listings jump the queue
-        |
-  Ollama           kimi-k3:cloud (fallback glm-5.2:cloud) reads the full ad, rejects misfits,
-                   writes a personal message in the ad's language from [me].about
-        |
-  send             Flatsforfriendz: Android app over ADB (uiautomator2), free option only
-                   WG-Gesucht, Kleinanzeigen, ImmoScout24, immowelt: dedicated Chrome profile (Playwright)
-```
+## How it works
 
-Listings that existed before the first run are worked through closest-first, one every
-`backlog_every_minutes` during the day. Everything is stored in `data/homeward.sqlite3`.
+Every minute or so it:
 
-## Setup (macOS)
+1. **Finds** new listings on Flatsforfriendz, WG-Gesucht, Kleinanzeigen, ImmoScout24 and immowelt.
+2. **Filters** them with fixed rules from `config.toml`: distance to work, all-in rent, move-in date, minimum stay.
+3. **Judges** each remaining listing with a model via the local Ollama app. The model reads the full ad,
+   rejects misfits and scams, and writes a short personal message in the ad's language.
+4. **Sends** the message. Flatsforfriendz goes through the Android app on a USB-connected phone, and the
+   other four sites go through a separate Chrome window that the bot keeps open.
+5. **Watches** the inboxes and notifies you about replies.
 
-```bash
-brew install --cask android-platform-tools   # adb
-uv venv -p 3.12 && uv pip install -e .
-cp config.example.toml config.toml           # fill in [me]
-.venv/bin/python -m homeward login           # log in to WG-Gesucht once, close the window
-```
+Closest listings go first. Everything is saved in `data/homeward.sqlite3`, and you can follow it on the
+dashboard at http://127.0.0.1:8765, where you can also pause sending.
 
-Phone: Developer options → USB debugging ON and **Stay awake** ON, Auto Blocker OFF, accept the
-"Allow USB debugging" prompt, be logged in to the Flatsforfriendz app. Ollama must be running and
-signed in (`ollama signin`) for the `:cloud` models.
+**Safety rules built into the code:**
+- It never pays for or ticks an upsell, and never sends the same flat twice.
+- It never solves a robot check itself. The check stays open for you to solve (see `captcha_wait_minutes`).
+- A send it can't confirm is marked *failed*, never retried blindly.
 
-## Use
+## Setup
+
+You need Python 3.12, [uv](https://docs.astral.sh/uv/), Google Chrome, [Ollama](https://ollama.com)
+(signed in, for the `:cloud` models) and adb (Android platform-tools).
 
 ```bash
-.venv/bin/python -m homeward scan             # dry: show what matches, ranked
-.venv/bin/python -m homeward draft fff:<id>   # show the message it would send
-.venv/bin/python -m homeward service install  # run in the background (launchd, survives reboot)
-.venv/bin/python -m homeward status           # what was applied / rejected / failed
-tail -f data/homeward.log
-.venv/bin/python -m homeward service uninstall
+uv venv -p 3.12
+uv pip install -e ".[dev]"
+cp config.example.toml config.toml      # then fill in [me]; config.toml stays private (git-ignored)
 ```
 
-Set `send = false` in `config.toml` to only get notifications with drafts.
-The phone must stay connected and unlocked (it is only used for a ~30 s burst per application).
+- **Get adb.** On macOS run `brew install --cask android-platform-tools`. On Windows run
+  `winget install Google.PlatformTools`.
+- **Prepare the phone.** Turn on USB debugging and *Stay awake*, accept the "Allow USB debugging" prompt,
+  and log in to the Flatsforfriendz app.
+- **Log in to the sites once.** Run `.venv/bin/python -m homeward login` (on Windows:
+  `.venv\Scripts\python -m homeward login`), log in to the sites in the Chrome window that opens,
+  then leave it open.
+
+## Daily use
+
+| Command (`python -m homeward …`) | What it does |
+|---|---|
+| `scan` | search once and show what matches, ranked; sends nothing |
+| `draft fff:<id>` | show the message it would send for one listing |
+| `service install` / `uninstall` / `status` | run in the background, also after a reboot |
+| `status` · `health` | what was applied, replied, failed |
+| `retry` | re-queue failed listings |
+
+Set `send = false` in `config.toml` to get drafts only. The logs are in `data/homeward.log`.
+
+## Code map
+
+| File | Role |
+|---|---|
+| `homeward/core.py` | config, the listing model, filter + ranking rules, SQLite store, notifications |
+| `homeward/sources.py` | Flatsforfriendz + WG-Gesucht discovery over plain HTTP |
+| `homeward/more.py` | Kleinanzeigen, ImmoScout24, immowelt: discovery, details, sending |
+| `homeward/wgg.py` | the bot Chrome window and WG-Gesucht sending + inbox |
+| `homeward/phone.py` | the Flatsforfriendz Android app over ADB |
+| `homeward/llm.py` | the one Ollama call per listing (judge + write) |
+| `homeward/agent.py` | the main loop that ties it together |
+| `homeward/dashboard.py` | the local web page |
+
+## Working on it
+
+- Run `python -m pytest`. The tests run offline: no phone, logins or Ollama needed.
+- GitHub Actions runs the same tests on Windows and macOS for every push and pull request.
+- Bugs and ideas go in [GitHub Issues](../../issues). This repo is public, so keep names,
+  addresses and phone numbers out of issues and logs you paste there.

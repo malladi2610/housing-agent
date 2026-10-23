@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
+import os
 import random
-import subprocess
+import sys
 import time
 from datetime import datetime
 
 from . import llm, more, sources
-from .core import DATA, SOURCES, Listing, Store, check, km_to_work, listing_from_row, load_config, log
+from .core import DATA, SOURCES, Listing, Store, check, km_to_work, listing_from_row, load_config, log, notify
 
 CFG_KEY = {"fff": "flatsforfriendz", "wgg": "wg_gesucht", "ka": "kleinanzeigen", "is24": "immoscout", "iw": "immowelt"}
 ENRICH = {"wgg": sources.enrich_wgg, "ka": more.enrich_ka, "is24": more.enrich_is24, "iw": more.enrich_iw}
@@ -18,12 +19,6 @@ BROWSER = ("is24", "iw")  # discovered through the bot Chrome: polled less often
 def title_key(title: str) -> str:
     """WG-Gesucht inbox rows show the ad title; its prefix links a reply to our listing."""
     return " ".join(title.split())[:30]
-
-
-def notify(title: str, body: str) -> None:
-    body = body.replace('"', "'")[:200]
-    subprocess.run(["osascript", "-e", f'display notification "{body}" with title "{title}" sound name "Glass"'],
-                   check=False, capture_output=True)
 
 
 class Agent:
@@ -72,9 +67,9 @@ class Agent:
                         new += self._consider(l, backlog=first_run)
             except Exception as e:
                 log(f"[{src}] poll failed: {e}")
-                if str(e).startswith("blocked:"):  # CAPTCHA / bot check: back off, never try to solve it
+                if str(e).startswith("blocked:"):  # robot check left unsolved (see more._wait_for_human): back off
                     self.next_poll[src] = time.time() + 3600
-                    notify("Homeward: bot check", f"{SOURCES[src]} shows a CAPTCHA, pausing it for 1 h")
+                    notify("Homeward: robot check not solved", f"{SOURCES[src]} paused for 1 h")
                 continue
             if first_run:
                 log(f"[{src}] first snapshot: {len(listings)} listings, backlog queued")
@@ -293,6 +288,10 @@ class Agent:
 
     def run(self) -> None:
         from .dashboard import PORT, serve
+        if sys.platform == "win32":  # keep the laptop awake while running (macOS: caffeinate in the service)
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)  # CONTINUOUS | SYSTEM_REQUIRED
+        (DATA / "agent.pid").write_text(str(os.getpid()))  # lets `service uninstall` stop it on Windows
         serve()
         log(f"homeward started (send={'off' if self.dry else 'on'}), dashboard http://127.0.0.1:{PORT}")
         while True:

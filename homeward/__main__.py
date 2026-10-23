@@ -8,7 +8,8 @@
   draft KEY            show the message the model would send for one listing (sends nothing)
   login                open the bot's Chrome window to log in to WG-Gesucht once
   retry                re-queue failed listings
-  service install|uninstall|status   background service (launchd, survives reboots)
+  service install|uninstall|status   background service that starts again after a reboot
+                       (macOS: launchd; Windows: Startup folder, no admin rights needed)
 """
 from __future__ import annotations
 
@@ -22,6 +23,8 @@ from .core import DATA, ROOT, SOURCES, Store, km_to_work, listing_from_row, load
 
 LABEL = "com.homeward.agent"
 PLIST = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
+STARTUP = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup/homeward.cmd"
+PID = DATA / "agent.pid"  # written by Agent.run()
 
 
 def show_rows(rows, limit=25):
@@ -30,6 +33,15 @@ def show_rows(rows, limit=25):
 
 
 def service(action: str) -> None:
+    DATA.mkdir(exist_ok=True)
+    if sys.platform == "win32":
+        service_windows(action)
+    else:
+        service_macos(action)
+
+
+def service_macos(action: str) -> None:
+    """launchd agent: restarts on crash, survives reboots; caffeinate keeps the Mac awake."""
     uid = os.getuid()
     if action == "install":
         python = ROOT / ".venv/bin/python"
@@ -53,7 +65,6 @@ def service(action: str) -> None:
   <key>StandardErrorPath</key><string>{DATA}/service.err.log</string>
 </dict></plist>
 """)
-        DATA.mkdir(exist_ok=True)
         subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], capture_output=True)
         time.sleep(2)  # let the old instance exit before re-registering
         subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(PLIST)], check=True)
@@ -66,6 +77,36 @@ def service(action: str) -> None:
         subprocess.run(["launchctl", "print", f"gui/{uid}/{LABEL}"])
 
 
+def _windows_pid() -> int | None:
+    """PID of the running agent, if the one recorded in data/agent.pid is still alive."""
+    if not PID.exists():
+        return None
+    pid = PID.read_text().strip()
+    alive = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
+    return int(pid) if pid in alive and "pythonw" in alive.lower() else None  # pid not reused by another program
+
+
+def service_windows(action: str) -> None:
+    """A Startup-folder entry starts the agent at every login; pythonw.exe runs it without a console window.
+    The agent keeps Windows awake itself (Agent.run). Unlike launchd, nothing restarts it after a crash."""
+    pythonw = ROOT / ".venv/Scripts/pythonw.exe"
+    if pid := _windows_pid():  # install restarts, uninstall stops
+        if action in ("install", "uninstall"):
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+    if action == "install":
+        STARTUP.write_text(f'@start "" /D "{ROOT}" "{pythonw}" -m homeward run\r\n')
+        with open(DATA / "service.out.log", "a") as out:
+            subprocess.Popen([str(pythonw), "-m", "homeward", "run"], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
+                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        print(f"started; logs: Get-Content -Wait {DATA / 'homeward.log'}")
+    elif action == "uninstall":
+        STARTUP.unlink(missing_ok=True)
+        print("stopped and removed")
+    else:
+        print(f"running (pid {pid})" if (pid := _windows_pid()) else "not running",
+              "| starts at login" if STARTUP.exists() else "| not set to start at login")
+
+
 def health() -> None:
     """Cheap monitor: heartbeat age, today's numbers, and only the log lines since the last check that matter."""
     from datetime import datetime
@@ -75,7 +116,7 @@ def health() -> None:
     counts = {r["status"]: r["n"] for r in store.db.execute("select status, count(*) n from listings group by 1")}
     sent = sum(store.sent_today(s) for s in SOURCES)
     log, mark = DATA / "homeward.log", DATA / "health.offset"
-    lines = log.read_text().splitlines() if log.exists() else []
+    lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
     start = int(mark.read_text()) if mark.exists() else max(0, len(lines) - 50)
     mark.write_text(str(len(lines)))
     events = [l for l in lines[start:] if any(k in l for k in ("REPLY", "ACCEPTED", "FAILED", "error", "failed", "waiting", "not logged in"))]
@@ -88,6 +129,9 @@ def health() -> None:
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles/log files aren't UTF-8; never crash on "→" or "€"
+        if stream:
+            stream.reconfigure(errors="replace")
     args = sys.argv[1:] or ["status"]
     cmd = args[0]
     if cmd in ("run", "once", "scan"):

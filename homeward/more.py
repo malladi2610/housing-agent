@@ -10,7 +10,7 @@ from datetime import date
 
 import httpx
 
-from .core import DATA, Listing, load_config, parse_euro
+from .core import DATA, Listing, load_config, notify, parse_euro
 from .sources import _text
 from .wgg import WggError, _dismiss_cookies, ensure_browser
 
@@ -71,7 +71,7 @@ GEO, _last_geo = DATA / "geocode.json", [0.0]
 
 def geocode(q: str) -> list[float] | None:
     """Nominatim (1 req/s, cached in data/geocode.json) for listings that only give a PLZ/district."""
-    cache = json.loads(GEO.read_text()) if GEO.exists() else {}
+    cache = json.loads(GEO.read_text(encoding="utf-8")) if GEO.exists() else {}
     if q not in cache:
         time.sleep(max(0.0, 1.1 - (time.time() - _last_geo[0])))
         r = httpx.get("https://nominatim.openstreetmap.org/search", timeout=20,
@@ -81,7 +81,7 @@ def geocode(q: str) -> list[float] | None:
         hits = r.raise_for_status().json()
         cache[q] = [float(hits[0]["lat"]), float(hits[0]["lon"])] if hits else None
         GEO.parent.mkdir(exist_ok=True)
-        GEO.write_text(json.dumps(cache, ensure_ascii=False))
+        GEO.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     return cache[q]
 
 
@@ -103,12 +103,36 @@ def tab():
             page.close()
 
 
+def _bot_check(page) -> bool:
+    """True while the site shows a robot check / CAPTCHA instead of the real page."""
+    return bool(re.search(r"Roboter|robot|captcha|Access Denied|Zugriff verweigert", page.title(), re.I)
+                or page.locator('iframe[src*="captcha-delivery"]').count())
+
+
+def _wait_for_human(page, url: str) -> None:
+    """Leave the robot check on screen for the user to solve (the bot never solves it itself).
+
+    The tab is brought to the front and stays open until the check is gone or
+    [run] captcha_wait_minutes runs out; only then does the source back off ("blocked:").
+    """
+    minutes = load_config()["run"].get("captcha_wait_minutes", 10)
+    site = re.sub(r"^https?://(www\.)?([^/]+).*", r"\2", url)
+    page.bring_to_front()
+    notify("Homeward: please solve the robot check", f"{site} is waiting in the bot Chrome (up to {minutes} min)")
+    deadline = time.time() + minutes * 60
+    while time.time() < deadline:
+        page.wait_for_timeout(3000)
+        if not _bot_check(page):
+            page.wait_for_timeout(2000)  # the site redirects back to the real page
+            return
+    raise SiteError(f"blocked: bot check on {url[:60]} not solved within {minutes} min")
+
+
 def _open(page, url: str, wait: int = 2500) -> None:
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(wait)
-    if (re.search(r"Roboter|robot|captcha|Access Denied|Zugriff verweigert", page.title(), re.I)
-            or page.locator('iframe[src*="captcha-delivery"]').count()):
-        raise SiteError(f"blocked: bot check on {url[:60]}")
+    if _bot_check(page):
+        _wait_for_human(page, url)
     _dismiss_cookies(page)
 
 
