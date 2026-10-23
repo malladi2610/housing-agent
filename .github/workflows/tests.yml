@@ -1,4 +1,4 @@
-# Runs the offline tests on every push and pull request, on the two systems the bot runs on.
+# Runs the offline tests on every pull request and push to main, on the two systems the bot runs on.
 # Nothing here needs the phone, Ollama, a login or the internet (beyond installing packages).
 name: tests
 
