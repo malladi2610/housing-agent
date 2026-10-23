@@ -1,0 +1,23 @@
+# Runs the offline tests on every push and pull request, on the two systems the bot runs on.
+# Nothing here needs the phone, Ollama, a login or the internet (beyond installing packages).
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest -v
+      - run: python -m homeward help   # the CLI starts and prints its usage
